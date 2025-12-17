@@ -115,7 +115,27 @@ jobs:
         with:
           path: crates/opencontext-node/artifacts
       
-      - name: Move artifacts
+      - name: List downloaded artifacts
+        working-directory: crates/opencontext-node
+        run: |
+          echo "=== Artifacts directory structure ==="
+          find artifacts -type f -name "*.node" 2>/dev/null || echo "No .node files found"
+          ls -laR artifacts/ || echo "artifacts dir not found"
+      
+      - name: Move artifacts to correct location
+        working-directory: crates/opencontext-node
+        run: |
+          # napi artifacts expects .node files directly in artifacts/
+          # but download-artifact creates subdirectories like artifacts/bindings-xxx/
+          for dir in artifacts/bindings-*/; do
+            if [ -d "$dir" ]; then
+              mv "$dir"*.node artifacts/ 2>/dev/null || true
+            fi
+          done
+          echo "=== After moving ==="
+          ls -la artifacts/
+      
+      - name: Run napi artifacts
         working-directory: crates/opencontext-node
         run: npm run artifacts
       
