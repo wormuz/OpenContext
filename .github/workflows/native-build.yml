@@ -1,16 +1,12 @@
 name: Build Native Modules
 
 on:
-  # Trigger after CI workflow completes successfully
-  workflow_run:
-    workflows: ["CI"]
-    types:
-      - completed
-    branches: [main, master]
-  # Also trigger on version tags (for releases)
+  # Only build on version tags (for releases)
   push:
     tags:
       - 'v*'
+  # Allow manual trigger for testing
+  workflow_dispatch:
 
 env:
   APP_NAME: opencontext-node
@@ -24,8 +20,6 @@ jobs:
   build:
     name: Build - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
-    # Only run if CI succeeded (for workflow_run trigger) or if it's a tag push
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'push' }}
     strategy:
       fail-fast: false
       matrix:
