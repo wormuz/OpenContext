@@ -8,6 +8,7 @@
     "oc": "./bin/oc.js"
   },
   "scripts": {
+    "prepare": "[ -d .git ] && ./scripts/setup-hooks.sh || true",
     "test": "npm run test:core && npm run test:search && npm run test:native",
     "test:core": "node --test tests/core/*.test.js",
     "test:search": "node --test tests/search/*.test.js",
