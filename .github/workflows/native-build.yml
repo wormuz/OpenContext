@@ -1,21 +1,69 @@
 name: Build Native Modules
 
 on:
-  # Only build on version tags (for releases)
+  # Only trigger on version tags
   push:
     tags:
       - 'v*'
   # Allow manual trigger for testing
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 0.1.7)'
+        required: false
+        type: string
 
 env:
   APP_NAME: opencontext-node
   MACOSX_DEPLOYMENT_TARGET: '10.13'
 
 jobs:
+  # First, ensure CI passes
+  ci-check:
+    name: Verify CI Status
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/opencontext-core -> target
+      
+      - name: Install Protobuf
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      
+      - name: Check Rust formatting
+        run: |
+          cd crates/opencontext-core
+          cargo fmt --check
+      
+      - name: Run Clippy
+        run: |
+          cd crates/opencontext-core
+          cargo clippy --features search -- -D warnings
+      
+      - name: Run Rust tests
+        run: |
+          cd crates/opencontext-core
+          cargo test --release --features search
+
+  # Build native modules after CI passes
   build:
     name: Build - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
+    needs: ci-check
     defaults:
       run:
         working-directory: crates/opencontext-node
@@ -81,12 +129,11 @@ jobs:
           path: crates/opencontext-node/*.node
           if-no-files-found: error
 
-  # Publish to npm when tag is pushed
+  # Publish to npm after build succeeds
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
     
     steps:
       - uses: actions/checkout@v4
@@ -101,13 +148,25 @@ jobs:
         run: npm ci
         working-directory: crates/opencontext-node
       
-      - name: Update version from tag
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event.inputs.version }}" != "" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="0.0.0-dev"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+        shell: bash
+      
+      - name: Update version
         working-directory: crates/opencontext-node
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "Updating version to $VERSION"
-          npm version $VERSION --no-git-tag-version --allow-same-version
+          npm version ${{ steps.version.outputs.version }} --no-git-tag-version --allow-same-version
         shell: bash
       
       - name: Download all artifacts
@@ -196,4 +255,3 @@ jobs:
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
