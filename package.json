@@ -40,7 +40,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gloria-zxr/OpenContext"
+    "url": "https://github.com/0xranx/OpenContext"
   },
   "publishConfig": {
     "access": "public"

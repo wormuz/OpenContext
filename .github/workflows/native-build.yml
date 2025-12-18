@@ -229,7 +229,7 @@ jobs:
               license: 'ISC',
               repository: {
                 type: 'git',
-                url: 'https://github.com/gloria-zxr/OpenContext'
+                url: 'https://github.com/0xranx/OpenContext'
               }
             };
             fs.writeFileSync(path.join(npmDir, 'package.json'), JSON.stringify(pkg, null, 2));

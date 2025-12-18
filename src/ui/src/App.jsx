@@ -570,9 +570,9 @@ export default function App() {
 
         // For documents, just rename in place
         await api.renameDoc(oldPath, newName);
-        if (selectedDoc?.rel_path === oldPath) {
+          if (selectedDoc?.rel_path === oldPath) {
           const finalPath = oldDir ? `${oldDir}/${newName}` : newName;
-          setSelectedDoc((prev) => (prev ? { ...prev, rel_path: finalPath } : prev));
+            setSelectedDoc((prev) => (prev ? { ...prev, rel_path: finalPath } : prev));
         }
 
         const data = await api.listFolders({ all: true });
