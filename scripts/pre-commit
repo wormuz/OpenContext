@@ -1,0 +1,30 @@
+#!/bin/sh
+#
+# Git pre-commit hook for OpenContext
+# Checks Rust formatting before allowing commits
+#
+
+echo "🔍 Checking Rust formatting..."
+
+# Check if cargo is available
+if ! command -v cargo &> /dev/null; then
+    echo "⚠️  cargo not found, skipping Rust format check"
+    exit 0
+fi
+
+# Check Rust formatting
+cd crates/opencontext-core
+if ! cargo fmt --check 2>/dev/null; then
+    echo ""
+    echo "❌ Rust formatting check failed!"
+    echo ""
+    echo "Please run the following command to fix:"
+    echo "  cd crates/opencontext-core && cargo fmt"
+    echo ""
+    echo "Then stage the changes and commit again."
+    exit 1
+fi
+
+echo "✅ Rust formatting OK"
+exit 0
+
