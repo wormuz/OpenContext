@@ -476,6 +476,9 @@ export default function App() {
         const parts = v.split('/');
         const fileName = parts.pop();
         const folderPath = parts.join('/');
+        const relPath = folderPath ? `${folderPath}/${fileName}` : fileName;
+
+        // 确保父级文件夹存在
         if (folderPath) {
           let current = '';
           for (const part of parts) {
@@ -484,10 +487,24 @@ export default function App() {
             await api.createFolder(current, '').catch(() => {});
           }
         }
+
+        // 创建文档
         await api.createDoc(folderPath, fileName, '');
+
+        // 刷新侧边栏
         const data = await api.listFolders({ all: true });
         setFolders(data);
         if (folderPath) await refreshFolder(folderPath);
+
+        // 默认选中新建的文档
+        await loadDoc(
+          {
+            rel_path: relPath,
+            description: '',
+            updated_at: new Date().toISOString(),
+          },
+          { urlMode: 'push' },
+        );
         return;
       }
 
