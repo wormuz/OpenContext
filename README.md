@@ -11,7 +11,7 @@
   </p>
 
   <!-- Demo GIF -->
-  <img src="docs/images/demo.gif" alt="OpenContext Demo" width="700">
+  <img src="docs/images/folder-refer-git.gif" alt="OpenContext Demo" width="700">
 
   <p>
     <a href="https://www.npmjs.com/package/@aicontextlab/cli"><img src="https://img.shields.io/npm/v/@aicontextlab/cli.svg?style=flat-square&color=cb3837" alt="npm version"></a>
