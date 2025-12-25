@@ -82,14 +82,11 @@ impl Searcher {
         };
 
         if let Some(filter_type) = options.doc_type.as_deref() {
-            hits = hits
-                .into_iter()
-                .filter(|hit| match filter_type {
-                    "idea" => hit.doc_type.as_deref() == Some("idea"),
-                    "doc" => hit.doc_type.as_deref().unwrap_or("doc") == "doc",
-                    _ => true,
-                })
-                .collect();
+            hits.retain(|hit| match filter_type {
+                "idea" => hit.doc_type.as_deref() == Some("idea"),
+                "doc" => hit.doc_type.as_deref().unwrap_or("doc") == "doc",
+                _ => true,
+            });
         }
 
         // Aggregate results
