@@ -354,12 +354,12 @@ export function SearchModal({ isOpen, onClose, onSelectDoc, onSelectIdea }) {
       >
         {/* Search Input Area */}
         <div className="px-4 py-4 border-b border-gray-100">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <div ref={filterRef} className="relative">
               <button
                 type="button"
                 onClick={() => setIsFilterOpen((prev) => !prev)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] text-gray-500 bg-gray-100 rounded-full hover:bg-gray-200/70 transition-colors"
+                className="flex items-center gap-1.5 px-2 py-1 text-[12px] font-medium text-gray-500 rounded-md hover:bg-gray-100 hover:text-gray-800 transition-colors"
                 aria-haspopup="listbox"
                 aria-expanded={isFilterOpen}
               >
@@ -388,13 +388,14 @@ export function SearchModal({ isOpen, onClose, onSelectDoc, onSelectIdea }) {
                 </div>
               )}
             </div>
+            <div className="h-4 w-px bg-gray-200" />
             <input
               ref={inputRef}
               type="text"
               value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={placeholderText}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={placeholderText}
               className="flex-1 text-lg text-[#37352f] placeholder-gray-400 bg-transparent border-none focus:ring-0 p-0 outline-none leading-tight"
               autoComplete="off"
               autoCorrect="off"
