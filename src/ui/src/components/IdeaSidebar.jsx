@@ -4,33 +4,73 @@
  * 显示按天分组的导航列表
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronRightIcon,
   ChevronDownIcon,
   PlusIcon,
   CalendarIcon,
+  SparklesIcon,
+  EllipsisHorizontalIcon,
+  PencilIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline';
 import { formatDateDisplay, formatDateKey } from '../utils/ideaUtils';
 
 export default function IdeaSidebar({
   isExpanded,
   onToggleExpand,
-  availableDates,
+  boxes = [],
+  selectedBox,
+  availableDatesByBox = {},
+  onSelectBox,
+  onCreateBox,
+  onRenameBox,
+  onDeleteBox,
   selectedDate,
   onSelectDate,
-  onAddNew,
 }) {
   const { t } = useTranslation();
+  const [expandedBoxes, setExpandedBoxes] = useState(() => new Set(selectedBox ? [selectedBox] : []));
+  const lastSelectedBoxRef = useRef(selectedBox);
+  const [menuBox, setMenuBox] = useState(null);
+  const menuRef = useRef(null);
+  const todayKey = useMemo(() => formatDateKey(new Date()), []);
 
-  // 确保至少显示今天
-  const displayDates = useMemo(() => {
-    const today = formatDateKey(new Date());
-    const dates = new Set(availableDates);
-    dates.add(today);
-    return Array.from(dates).sort((a, b) => b.localeCompare(a));
-  }, [availableDates]);
+  useEffect(() => {
+    if (!selectedBox) return;
+    if (selectedBox !== lastSelectedBoxRef.current) {
+      setExpandedBoxes((prev) => {
+        if (prev.has(selectedBox)) return prev;
+        const next = new Set(prev);
+        next.add(selectedBox);
+        return next;
+      });
+      lastSelectedBoxRef.current = selectedBox;
+    }
+  }, [selectedBox]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setMenuBox(null);
+      }
+    };
+    if (menuBox) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [menuBox]);
+
+  const buildDisplayDates = useCallback(
+    (dates = []) => {
+      const set = new Set(dates);
+      set.add(todayKey);
+      return Array.from(set).sort((a, b) => b.localeCompare(a));
+    },
+    [todayKey]
+  );
 
   return (
     <div className="mb-2">
@@ -49,34 +89,132 @@ export default function IdeaSidebar({
           className="w-3 h-3 ml-auto opacity-0 group-hover:opacity-100 hover:text-gray-900"
           onClick={(e) => {
             e.stopPropagation();
-            onAddNew?.();
+            onCreateBox?.();
           }}
-          title={t('idea.addNew', 'Add new idea')}
+          title={t('idea.addBox', 'New box')}
         >
           <PlusIcon className="w-3 h-3" />
         </button>
       </div>
 
-      {/* Date List */}
+      {/* Ideas Box List */}
       {isExpanded && (
         <div className="mt-1">
-          {displayDates.map((dateKey) => (
-            <div
-              key={dateKey}
-              onClick={() => onSelectDate(dateKey)}
-              className={`flex items-center gap-2 mx-2 px-5 py-1.5 text-sm cursor-pointer transition-colors rounded-sm ${
-                selectedDate === dateKey
-                  ? 'bg-gray-200 text-gray-900 font-medium'
-                  : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <CalendarIcon className="w-4 h-4 text-gray-400" />
-              <span>{formatDateDisplay(dateKey)}</span>
-            </div>
-          ))}
+          {(boxes.length ? boxes : ['inbox']).map((box) => {
+            const isBoxExpanded = expandedBoxes.has(box);
+            const isSelected = selectedBox === box;
+            const label = box === 'inbox' ? t('idea.boxInbox', 'Inbox') : box;
+            return (
+              <div key={box} className="mb-1">
+                <div
+                  className="group flex items-center gap-2 mx-2 px-3 py-1.5 text-sm cursor-pointer transition-colors rounded-sm text-gray-600 hover:bg-gray-100"
+                  onClick={() => {
+                    setExpandedBoxes((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(box)) {
+                        next.delete(box);
+                      } else {
+                        next.add(box);
+                      }
+                      return next;
+                    });
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="p-0.5 rounded-sm hover:bg-gray-200/70"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExpandedBoxes((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(box)) {
+                          next.delete(box);
+                        } else {
+                          next.add(box);
+                        }
+                        return next;
+                      });
+                    }}
+                  >
+                    {isBoxExpanded ? (
+                      <ChevronDownIcon className="w-3 h-3 text-gray-400" />
+                    ) : (
+                      <ChevronRightIcon className="w-3 h-3 text-gray-400" />
+                    )}
+                  </button>
+                  <SparklesIcon className="w-4 h-4 text-gray-400" />
+                  <span className="truncate">{label}</span>
+                  <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMenuBox((prev) => (prev === box ? null : box));
+                      }}
+                      className="p-1 rounded hover:bg-gray-200/70 text-gray-400 hover:text-gray-600"
+                      title={t('common.edit', 'Edit')}
+                    >
+                      <EllipsisHorizontalIcon className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {menuBox === box && (
+                  <div ref={menuRef} className="relative mx-2">
+                    <div className="absolute right-2 top-0 mt-1 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-50 min-w-[140px]">
+                      <button
+                        type="button"
+                        className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-100 text-left ${box === 'inbox' ? 'text-gray-300 cursor-not-allowed' : 'text-gray-700'}`}
+                        onClick={() => {
+                          if (box === 'inbox') return;
+                          setMenuBox(null);
+                          onRenameBox?.(box);
+                        }}
+                        disabled={box === 'inbox'}
+                      >
+                        <PencilIcon className={`h-4 w-4 ${box === 'inbox' ? 'text-gray-300' : 'text-gray-500'}`} />
+                        {t('contextMenu.rename', '重命名')}
+                      </button>
+                      <button
+                        type="button"
+                        className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-100 text-left ${box === 'inbox' ? 'text-gray-300 cursor-not-allowed' : 'text-red-600'}`}
+                        onClick={() => {
+                          if (box === 'inbox') return;
+                          setMenuBox(null);
+                          onDeleteBox?.(box);
+                        }}
+                        disabled={box === 'inbox'}
+                      >
+                        <TrashIcon className={`h-4 w-4 ${box === 'inbox' ? 'text-gray-300' : 'text-red-500'}`} />
+                        {t('contextMenu.delete', '删除')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {isBoxExpanded && (
+                  <div className="mt-1 ml-10 pl-4 border-l border-gray-200">
+                    {buildDisplayDates(availableDatesByBox[box] || []).map((dateKey) => (
+                      <div
+                        key={`${box}-${dateKey}`}
+                        onClick={() => onSelectDate(dateKey, box)}
+                        className={`flex items-center gap-2 mr-2 px-3 py-1.5 text-sm cursor-pointer transition-colors rounded-sm ${
+                          selectedDate === dateKey && selectedBox === box
+                            ? 'bg-gray-200 text-gray-900 font-medium'
+                            : 'text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        <CalendarIcon className="w-4 h-4 text-gray-400" />
+                        <span>{formatDateDisplay(dateKey)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
-

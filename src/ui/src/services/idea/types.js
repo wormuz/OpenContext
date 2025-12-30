@@ -20,6 +20,7 @@
  * @property {string} createdAt - 创建时间 (ISO8601)
  * @property {string} updatedAt - 最后更新时间 (ISO8601)
  * @property {Entry[]} entries - 条目列表
+ * @property {string} [box] - 所属 Ideas Box
  */
 
 /**
@@ -27,6 +28,7 @@
  * @property {string} content - 第一条内容
  * @property {string} [title] - 可选标题
  * @property {boolean} [isAI] - 是否为 AI 生成
+ * @property {string} [box] - 所属 Ideas Box
  */
 
 /**
@@ -40,8 +42,8 @@
  * @typedef {Object} ThreadFilter
  * @property {string} [date] - 按日期筛选 (YYYY-MM-DD)
  * @property {string} [search] - 搜索关键词
+ * @property {string} [box] - 按 Ideas Box 筛选
  */
 
 // 导出空对象以支持 JSDoc 类型引用
 export default {};
-

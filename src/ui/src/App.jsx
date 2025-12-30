@@ -185,6 +185,10 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const params = useParams();
+  const ideaBoxParam = useMemo(() => {
+    const searchParams = new URLSearchParams(location.search || '');
+    return searchParams.get('box') || '';
+  }, [location.search]);
   
   // 根据路由路径确定当前视图
   const view = useMemo(() => {
@@ -215,6 +219,7 @@ export default function App() {
 
   const autoSaveTimerRef = useRef(null);
   const saveDocumentRef = useRef(null);
+  const lastIdeaBoxParamRef = useRef(ideaBoxParam);
 
   const folderError = useCallback(
     (err) => {
@@ -311,6 +316,18 @@ export default function App() {
 
   // Idea module
   const ideaLoader = useIdeaLoader({ api });
+  const buildIdeaRoute = useCallback((box, date) => {
+    const safeBox = box ? encodeURIComponent(box) : '';
+    const base = date ? ROUTES.IDEA_DATE(date) : ROUTES.IDEA;
+    return safeBox ? `${base}?box=${safeBox}` : base;
+  }, []);
+  const extractIdeaBox = useCallback((threadId) => {
+    if (!threadId) return 'inbox';
+    const normalized = threadId.startsWith('.ideas/') ? threadId.slice('.ideas/'.length) : threadId;
+    const first = normalized.split('/').filter(Boolean)[0] || '';
+    if (/^\d{4}$/.test(first)) return 'inbox';
+    return first || 'inbox';
+  }, []);
   const openDocFromRef = useCallback((stableId, meta) => {
     navigate(ROUTES.HOME);
     openDocByStableId(stableId, meta);
@@ -318,16 +335,20 @@ export default function App() {
   const openIdeaRef = useCallback((ref) => {
     if (!ref) return;
     const date = String(ref.date || '').trim();
+    const box = extractIdeaBox(ref.threadId || '');
+    if (box) {
+      ideaLoader.setSelectedBox(box);
+    }
     if (date) {
       ideaLoader.setSelectedDate(date);
-      navigate(ROUTES.IDEA_DATE(date));
+      navigate(buildIdeaRoute(box, date));
     } else {
-      navigate(ROUTES.IDEA);
+      navigate(buildIdeaRoute(box));
     }
     if (ref.entryId) {
       setIdeaFocusEntryId(ref.entryId);
     }
-  }, [ideaLoader, navigate]);
+  }, [buildIdeaRoute, extractIdeaBox, ideaLoader, navigate]);
 
   // 当切换到非编辑器视图时，清除文档选中状态
   // 使用 ref 追踪上一次的 view，避免不必要的更新和循环
@@ -348,6 +369,15 @@ export default function App() {
       ideaLoader.setSelectedDate(params.date);
     }
   }, [view, params.date]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (view !== 'idea') return;
+    if (ideaBoxParam === lastIdeaBoxParamRef.current) return;
+    lastIdeaBoxParamRef.current = ideaBoxParam;
+    if (ideaBoxParam && ideaBoxParam !== ideaLoader.selectedBox) {
+      ideaLoader.setSelectedBox(ideaBoxParam);
+    }
+  }, [ideaBoxParam, ideaLoader.selectedBox, ideaLoader.setSelectedBox, view]);
 
   // Sidebar Resize Logic (Same as before)
   const startResizing = useCallback((e) => { e.preventDefault(); setIsResizingSidebar(true); }, []);
@@ -385,6 +415,58 @@ export default function App() {
       initialValue: folderPath ? `${folderPath}/` : '',
       kind: 'CREATE_FOLDER',
       payload: { folderPath }
+    });
+  };
+
+  const handleCreateIdeaBoxAction = () => {
+    setDialog({
+      isOpen: true,
+      type: 'prompt',
+      title: t('idea.boxCreateTitle', 'New Ideas Box'),
+      placeholder: t('idea.boxCreatePlaceholder', 'Box name'),
+      kind: 'CREATE_IDEA_BOX',
+    });
+  };
+
+  const handleRenameIdeaBoxAction = (box) => {
+    if (!box) return;
+    setDialog({
+      isOpen: true,
+      type: 'prompt',
+      title: t('idea.boxRenameTitle', 'Rename Ideas Box'),
+      placeholder: t('idea.boxRenamePlaceholder', 'New name'),
+      initialValue: box,
+      kind: 'RENAME_IDEA_BOX',
+      payload: { box },
+    });
+  };
+
+  const handleDeleteIdeaBoxAction = (box) => {
+    if (!box) return;
+    setDialog({
+      isOpen: true,
+      type: 'confirm',
+      title: t('idea.boxDeleteTitle', 'Delete Ideas Box'),
+      message: t('idea.boxDeleteMessage', { name: box }),
+      isDestructive: true,
+      confirmText: t('dialog.deleteItem.confirmText'),
+      kind: 'DELETE_IDEA_BOX',
+      payload: { box },
+    });
+  };
+
+  const handleMoveIdeaThreadAction = (thread) => {
+    if (!thread?.threadId) return;
+    setDialog({
+      isOpen: true,
+      type: 'prompt',
+      title: t('idea.moveThreadTitle', 'Move thread to box'),
+      message: t('idea.moveThreadMessage', { name: thread.threadTitle || thread.threadId }),
+      placeholder: t('idea.moveThreadPlaceholder', 'Target box name'),
+      initialValue: ideaLoader.selectedBox || '',
+      confirmText: t('common.move', 'Move'),
+      kind: 'MOVE_IDEA_THREAD',
+      payload: { threadId: thread.threadId },
     });
   };
 
@@ -583,6 +665,17 @@ export default function App() {
         return;
       }
 
+      if (kind === 'CREATE_IDEA_BOX') {
+        const v = String(value || '').trim();
+        if (!v) return;
+        if (v.includes('/') || v.includes('\\')) {
+          throw new Error(t('dialog.rename.invalidName') || 'Name cannot contain path separators');
+        }
+        const boxName = await ideaLoader.createBox(v);
+        navigate(buildIdeaRoute(boxName, ideaLoader.selectedDate));
+        return;
+      }
+
       if (kind === 'MOVE_DOC') {
         const destFolderPath = String(value || '').trim();
         const docRelPath = payload.docRelPath;
@@ -664,6 +757,18 @@ export default function App() {
         return;
       }
 
+      if (kind === 'RENAME_IDEA_BOX') {
+        const newName = String(value || '').trim();
+        if (!newName) return;
+        if (newName.includes('/') || newName.includes('\\')) {
+          throw new Error(t('dialog.rename.invalidName') || 'Name cannot contain path separators');
+        }
+        const oldName = payload.box;
+        const boxName = await ideaLoader.renameBox(oldName, newName);
+        navigate(buildIdeaRoute(boxName, ideaLoader.selectedDate));
+        return;
+      }
+
       if (kind === 'SET_DESCRIPTION') {
         const v = String(value || '');
         const docRelPath = payload.docRelPath;
@@ -679,6 +784,20 @@ export default function App() {
 
       if (kind === 'DELETE_ITEM') {
         await performDelete(payload.item);
+      }
+
+      if (kind === 'DELETE_IDEA_BOX') {
+        const box = payload.box;
+        await ideaLoader.deleteBox(box);
+        navigate(buildIdeaRoute(ideaLoader.selectedBox, ideaLoader.selectedDate));
+        return;
+      }
+
+      if (kind === 'MOVE_IDEA_THREAD') {
+        const targetBox = String(value || '').trim();
+        if (!targetBox) return;
+        await ideaLoader.moveThread(payload.threadId, targetBox);
+        return;
       }
     } catch (err) {
       setDialog({ isOpen: true, type: 'alert', title: t('error.operationFailed'), message: err.message, kind: 'ALERT' });
@@ -797,7 +916,10 @@ export default function App() {
           onRequestMoveFromDnd={handleRequestMoveFromDnd}
           onRequestSearch={() => setIsSearchOpen(true)}
           onRequestSettings={() => navigate(ROUTES.SETTINGS)}
-          onRequestIdea={() => navigate(ROUTES.IDEA)}
+          onRequestIdea={() => navigate(buildIdeaRoute(ideaLoader.selectedBox))}
+          onRequestCreateIdeaBox={handleCreateIdeaBoxAction}
+          onRequestRenameIdeaBox={handleRenameIdeaBoxAction}
+          onRequestDeleteIdeaBox={handleDeleteIdeaBoxAction}
           ideaLoader={ideaLoader}
           onCopyFolderCitation={handleCopyFolderCitation}
           onCopyDocCitation={handleCopyDocCitation}
@@ -830,12 +952,14 @@ export default function App() {
         ) : view === 'idea' ? (
           <IdeaTimeline
             selectedDate={ideaLoader.selectedDate}
+            selectedBox={ideaLoader.selectedBox}
             allEntriesGrouped={ideaLoader.allEntriesGrouped}
             isLoading={ideaLoader.isLoading}
             onAddEntry={ideaLoader.addEntry}
             onContinueThread={ideaLoader.continueThread}
             onAddAIReflection={ideaLoader.addAIReflection}
             onDeleteEntry={ideaLoader.deleteEntry}
+            onRequestMoveThread={handleMoveIdeaThreadAction}
             onOpenDocById={openDocFromRef}
             onOpenIdeaRef={openIdeaRef}
             focusEntryId={ideaFocusEntryId}

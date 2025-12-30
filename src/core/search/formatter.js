@@ -28,6 +28,7 @@ function normalizeResult(result) {
     entry_id: result.entry_id || result.entryId,
     entry_date: result.entry_date || result.entryDate,
     entry_created_at: result.entry_created_at || result.entryCreatedAt,
+    idea_box: result.idea_box || result.ideaBox,
   };
 }
 

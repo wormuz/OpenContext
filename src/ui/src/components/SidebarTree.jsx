@@ -401,6 +401,9 @@ export function SidebarTree({
   onRequestSearch,
   onRequestSettings,
   onRequestIdea,
+  onRequestCreateIdeaBox,
+  onRequestRenameIdeaBox,
+  onRequestDeleteIdeaBox,
   ideaLoader,
   onCopyFolderCitation,
   onCopyDocCitation,
@@ -421,6 +424,12 @@ export function SidebarTree({
   const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
   const [activeDragItem, setActiveDragItem] = useState(null);
   const [isIdeasExpanded, setIsIdeasExpanded] = useState(true);
+
+  const buildIdeaRoute = useCallback((box, date) => {
+    const safeBox = box ? encodeURIComponent(box) : '';
+    const base = date ? ROUTES.IDEA_DATE(date) : ROUTES.IDEA;
+    return safeBox ? `${base}?box=${safeBox}` : base;
+  }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -490,13 +499,24 @@ export function SidebarTree({
           <IdeaSidebar
             isExpanded={isIdeasExpanded}
             onToggleExpand={() => setIsIdeasExpanded(!isIdeasExpanded)}
-            availableDates={ideaLoader.availableDates}
-            selectedDate={activeView === 'idea' ? ideaLoader.selectedDate : null}
-            onSelectDate={(date) => {
-              ideaLoader.setSelectedDate(date);
-              navigate(ROUTES.IDEA_DATE(date));
+            boxes={ideaLoader.boxes}
+            selectedBox={ideaLoader.selectedBox}
+            availableDatesByBox={ideaLoader.availableDatesByBox}
+            onSelectBox={(box) => {
+              ideaLoader.setSelectedBox(box);
+              navigate(buildIdeaRoute(box, ideaLoader.selectedDate));
             }}
-            onAddNew={() => navigate(ROUTES.IDEA)}
+            onCreateBox={onRequestCreateIdeaBox}
+            onRenameBox={onRequestRenameIdeaBox}
+            onDeleteBox={onRequestDeleteIdeaBox}
+            selectedDate={activeView === 'idea' ? ideaLoader.selectedDate : null}
+            onSelectDate={(date, box) => {
+              if (box && box !== ideaLoader.selectedBox) {
+                ideaLoader.setSelectedBox(box);
+              }
+              ideaLoader.setSelectedDate(date);
+              navigate(buildIdeaRoute(box || ideaLoader.selectedBox, date));
+            }}
           />
         )}
 
@@ -610,5 +630,3 @@ export function SidebarTree({
     </aside>
   );
 }
-
-

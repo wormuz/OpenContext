@@ -1,10 +1,6 @@
 //! Document indexer
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-
-use regex::Regex;
-use urlencoding::decode;
 
 use super::chunker::Chunker;
 use super::config::SearchConfig;
@@ -14,18 +10,13 @@ use super::types::Chunk;
 use super::vector_store::VectorStore;
 
 #[derive(Clone)]
-struct DocInfo {
-    name: String,
-    rel_path: String,
-    description: String,
-}
-
-#[derive(Clone)]
 struct IdeaEntry {
     id: String,
     created_at: String,
     content: String,
 }
+
+const DEFAULT_IDEA_BOX: &str = "inbox";
 
 fn parse_idea_marker(line: &str) -> Option<(String, String)> {
     let trimmed = line.trim();
@@ -84,102 +75,24 @@ fn parse_idea_entries(content: &str) -> Vec<IdeaEntry> {
     entries
 }
 
-fn extract_refs(text: &str) -> Vec<(String, String)> {
-    let regex = Regex::new(r"\[([^\]]+)\]\((oc://[^)]+)\)").unwrap();
-    regex
-        .captures_iter(text)
-        .map(|cap| (cap[1].to_string(), cap[2].to_string()))
-        .collect()
-}
-
-fn parse_doc_href(href: &str) -> (Option<String>, Option<String>) {
-    if !href.starts_with("oc://doc/") {
-        return (None, None);
+fn extract_idea_box(rel_path: &str) -> Option<String> {
+    let normalized = rel_path.trim_start_matches("./");
+    if !normalized.starts_with(".ideas/") {
+        return None;
     }
-    let raw = href.trim_start_matches("oc://doc/");
-    let mut stable_id = raw.to_string();
-    let mut path_param: Option<String> = None;
-    if let Some((id, query)) = raw.split_once('?') {
-        stable_id = id.to_string();
-        if let Some(path) = query.split('&').find_map(|pair| {
-            let mut iter = pair.splitn(2, '=');
-            match (iter.next(), iter.next()) {
-                (Some("path"), Some(value)) => Some(value.to_string()),
-                _ => None,
-            }
-        }) {
-            if let Ok(decoded) = decode(&path) {
-                path_param = Some(decoded.to_string());
+    let rest = &normalized[".ideas/".len()..];
+    let mut parts = rest.split('/').filter(|p| !p.is_empty());
+    let first = parts.next();
+    match first {
+        None => Some(DEFAULT_IDEA_BOX.to_string()),
+        Some(seg) => {
+            if seg.len() == 4 && seg.chars().all(|c| c.is_ascii_digit()) {
+                Some(DEFAULT_IDEA_BOX.to_string())
+            } else {
+                Some(seg.to_string())
             }
         }
     }
-    let stable_id = if stable_id.is_empty() {
-        None
-    } else {
-        Some(stable_id)
-    };
-    (stable_id, path_param)
-}
-
-fn append_reference_summary(
-    text: &str,
-    doc_by_stable: &HashMap<String, DocInfo>,
-    doc_by_path: &HashMap<String, DocInfo>,
-) -> String {
-    let refs = extract_refs(text);
-    if refs.is_empty() {
-        return text.to_string();
-    }
-
-    let mut lines: Vec<String> = Vec::new();
-    for (label, href) in refs {
-        if href.starts_with("oc://doc/") {
-            let (stable_id, path) = parse_doc_href(&href);
-            let meta = stable_id
-                .as_ref()
-                .and_then(|id| doc_by_stable.get(id))
-                .cloned()
-                .or_else(|| path.as_ref().and_then(|p| doc_by_path.get(p)).cloned());
-            let title = if !label.is_empty() {
-                label
-            } else {
-                meta.as_ref()
-                    .map(|m| m.name.clone())
-                    .unwrap_or_else(|| "文档".to_string())
-            };
-            let summary = meta
-                .as_ref()
-                .map(|m| {
-                    let mut parts = Vec::new();
-                    if !m.description.is_empty() {
-                        parts.push(m.description.clone());
-                    }
-                    if !m.rel_path.is_empty() {
-                        parts.push(m.rel_path.clone());
-                    }
-                    parts.join(" · ")
-                })
-                .unwrap_or_default();
-            if summary.is_empty() {
-                lines.push(format!("文档: {}", title));
-            } else {
-                lines.push(format!("文档: {} — {}", title, summary));
-            }
-        } else if href.starts_with("oc://idea/") {
-            let title = if !label.is_empty() {
-                label
-            } else {
-                "想法".to_string()
-            };
-            lines.push(format!("想法: {}", title));
-        }
-    }
-
-    if lines.is_empty() {
-        return text.to_string();
-    }
-
-    format!("{text}\n\n引用:\n- {}", lines.join("\n- "))
 }
 
 /// Index build statistics
@@ -290,18 +203,6 @@ impl Indexer {
         let mut total_chunks = 0;
         let mut processed_docs = 0;
 
-        let mut doc_by_stable: HashMap<String, DocInfo> = HashMap::new();
-        let mut doc_by_path: HashMap<String, DocInfo> = HashMap::new();
-        for doc in &docs {
-            let info = DocInfo {
-                name: doc.name.clone(),
-                rel_path: doc.rel_path.clone(),
-                description: doc.description.clone(),
-            };
-            doc_by_stable.insert(doc.stable_id.clone(), info.clone());
-            doc_by_path.insert(doc.rel_path.clone(), info);
-        }
-
         // Reset existing index
         self.vector_store.reset().await?;
 
@@ -333,6 +234,7 @@ impl Indexer {
 
                 if doc.rel_path.starts_with(".ideas/") {
                     let entries = parse_idea_entries(&content);
+                    let idea_box = extract_idea_box(&doc.rel_path);
                     for (i, entry) in entries.into_iter().enumerate() {
                         let entry_date = entry.created_at.get(0..10).unwrap_or("").to_string();
                         let title_line = entry
@@ -342,13 +244,11 @@ impl Indexer {
                             .unwrap_or("")
                             .trim()
                             .to_string();
-                        let entry_content =
-                            append_reference_summary(&entry.content, &doc_by_stable, &doc_by_path);
                         let id = format!("{}#{}", doc.rel_path, entry.id);
                         all_chunks.push(Chunk {
                             id,
                             file_path: doc.rel_path.clone(),
-                            content: entry_content,
+                            content: entry.content,
                             heading_path: String::new(),
                             section_title: if title_line.is_empty() {
                                 None
@@ -363,6 +263,7 @@ impl Indexer {
                                 Some(entry_date)
                             },
                             entry_created_at: Some(entry.created_at),
+                            idea_box: idea_box.clone(),
                             chunk_index: i,
                             vector: vec![], // Will be filled below
                         });
@@ -382,6 +283,7 @@ impl Indexer {
                             entry_id: None,
                             entry_date: None,
                             entry_created_at: None,
+                            idea_box: None,
                             chunk_index: i,
                             vector: vec![], // Will be filled below
                         });
@@ -478,6 +380,7 @@ impl Indexer {
 
         if rel_path.starts_with(".ideas/") {
             let entries = parse_idea_entries(&content);
+            let idea_box = extract_idea_box(rel_path);
             for (i, entry) in entries.into_iter().enumerate() {
                 let entry_date = entry.created_at.get(0..10).unwrap_or("").to_string();
                 let title_line = entry
@@ -506,6 +409,7 @@ impl Indexer {
                         Some(entry_date)
                     },
                     entry_created_at: Some(entry.created_at),
+                    idea_box: idea_box.clone(),
                     chunk_index: i,
                     vector: vec![],
                 });
@@ -524,6 +428,7 @@ impl Indexer {
                     entry_id: None,
                     entry_date: None,
                     entry_created_at: None,
+                    idea_box: None,
                     chunk_index: i,
                     vector: vec![],
                 });

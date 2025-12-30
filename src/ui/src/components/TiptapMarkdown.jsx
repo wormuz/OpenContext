@@ -306,6 +306,43 @@ const SimpleCodeBlock = CodeBlockLowlight.configure({
   },
 });
 
+const StableTableOfContents = TableOfContents.extend({
+  addStorage() {
+    return {
+      ...this.parent?.(),
+      pendingUpdate: false,
+      compositionHandler: null,
+    };
+  },
+  onCreate() {
+    this.parent?.();
+    if (!this.editor?.view?.dom) return;
+
+    const handleCompositionEnd = () => {
+      if (!this.storage.pendingUpdate) return;
+      this.storage.pendingUpdate = false;
+      this.editor.commands.updateTableOfContents();
+    };
+
+    this.storage.compositionHandler = handleCompositionEnd;
+    this.editor.view.dom.addEventListener('compositionend', handleCompositionEnd);
+  },
+  onDestroy() {
+    if (this.storage?.compositionHandler && this.editor?.view?.dom) {
+      this.editor.view.dom.removeEventListener('compositionend', this.storage.compositionHandler);
+    }
+    this.parent?.();
+  },
+  onTransaction({ transaction }) {
+    if (!transaction.docChanged || transaction.getMeta('toc')) return;
+    if (transaction.getMeta('composition') || this.editor?.view?.composing) {
+      this.storage.pendingUpdate = true;
+      return;
+    }
+    this.editor.commands.updateTableOfContents();
+  },
+});
+
 // Custom Link extension that handles oc:// protocol
 const CustomLink = Link.extend({
   addOptions() {
@@ -389,7 +426,7 @@ export const TiptapMarkdownEditor = forwardRef(function TiptapMarkdownEditor({
           class: 'tiptap-image',
         },
       }),
-      TableOfContents.configure({
+      StableTableOfContents.configure({
         onUpdate: (anchors = []) => {
           // anchors: [{ id, level, textContent, originalLevel, isActive, pos, node, ... }]
           const mapped = anchors.map((a, idx) => {

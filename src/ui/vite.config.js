@@ -30,8 +30,13 @@ export default defineConfig({
   },
   build: {
     outDir: path.resolve(__dirname, '../../dist/ui'),
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        mobile: path.resolve(__dirname, 'mobile.html')
+      }
+    }
   },
   publicDir: path.resolve(__dirname, 'public')
 });
-

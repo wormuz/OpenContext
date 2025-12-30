@@ -505,6 +505,7 @@ impl Searcher {
                     entry_id: None,
                     entry_date: None,
                     entry_created_at: None,
+                    idea_box: doc.top_chunk.idea_box,
                 }
             })
             .collect();
@@ -600,6 +601,7 @@ impl Searcher {
                     entry_id: None,
                     entry_date: None,
                     entry_created_at: None,
+                    idea_box: folder.top_chunk.idea_box,
                 }
             })
             .collect();

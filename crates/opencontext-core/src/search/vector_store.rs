@@ -87,6 +87,7 @@ impl VectorStore {
             Field::new("entry_id", DataType::Utf8, true),
             Field::new("entry_date", DataType::Utf8, true),
             Field::new("entry_created_at", DataType::Utf8, true),
+            Field::new("idea_box", DataType::Utf8, true),
             Field::new("chunk_index", DataType::UInt32, false),
             Field::new(
                 "vector",
@@ -164,6 +165,10 @@ impl VectorStore {
             .iter()
             .map(|c| c.entry_created_at.as_deref().unwrap_or(""))
             .collect();
+        let idea_boxes: Vec<&str> = chunks
+            .iter()
+            .map(|c| c.idea_box.as_deref().unwrap_or(""))
+            .collect();
         let chunk_indices: Vec<u32> = chunks.iter().map(|c| c.chunk_index as u32).collect();
 
         let vectors_array = FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(
@@ -185,6 +190,7 @@ impl VectorStore {
                 Arc::new(StringArray::from(entry_ids)),
                 Arc::new(StringArray::from(entry_dates)),
                 Arc::new(StringArray::from(entry_created_ats)),
+                Arc::new(StringArray::from(idea_boxes)),
                 Arc::new(UInt32Array::from(chunk_indices)),
                 Arc::new(vectors_array),
             ],
@@ -248,6 +254,10 @@ impl VectorStore {
 
             let entry_created_ats = batch
                 .column_by_name("entry_created_at")
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+
+            let idea_boxes = batch
+                .column_by_name("idea_box")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
             let line_starts = batch
@@ -317,6 +327,15 @@ impl VectorStore {
                     }
                 });
 
+                let idea_box = idea_boxes.and_then(|arr| {
+                    let val = arr.value(i);
+                    if val.is_empty() {
+                        None
+                    } else {
+                        Some(val.to_string())
+                    }
+                });
+
                 let line_start = line_starts.map(|arr| arr.value(i) as usize);
                 let line_end = line_ends.map(|arr| arr.value(i) as usize);
 
@@ -366,6 +385,7 @@ impl VectorStore {
                     entry_id,
                     entry_date,
                     entry_created_at,
+                    idea_box,
                 });
             }
         }
@@ -478,6 +498,10 @@ impl VectorStore {
                 .column_by_name("entry_created_at")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
+            let idea_boxes = batch
+                .column_by_name("idea_box")
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+
             let line_starts = batch
                 .column_by_name("line_start")
                 .and_then(|c| c.as_any().downcast_ref::<arrow_array::Int64Array>());
@@ -542,6 +566,15 @@ impl VectorStore {
                     }
                 });
 
+                let idea_box = idea_boxes.and_then(|arr| {
+                    let val = arr.value(i);
+                    if val.is_empty() {
+                        None
+                    } else {
+                        Some(val.to_string())
+                    }
+                });
+
                 let line_start = line_starts.map(|arr| arr.value(i) as usize);
                 let line_end = line_ends.map(|arr| arr.value(i) as usize);
 
@@ -584,6 +617,7 @@ impl VectorStore {
                     entry_id,
                     entry_date,
                     entry_created_at,
+                    idea_box,
                 });
             }
         }
