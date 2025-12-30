@@ -1,6 +1,11 @@
 # Dependencies
 node_modules/
 
+# Expo
+.expo/
+.expo-shared/
+.expo-devices
+
 # Database
 opencontext.db
 *.db

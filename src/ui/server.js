@@ -635,7 +635,8 @@ async function createUiServer({ host = '127.0.0.1', port = 3222 }) {
           doc_type: r.docType || r.doc_type,
           entry_id: r.entryId || r.entry_id,
           entry_date: r.entryDate || r.entry_date,
-          entry_created_at: r.entryCreatedAt || r.entry_created_at
+          entry_created_at: r.entryCreatedAt || r.entry_created_at,
+          idea_box: r.ideaBox || r.idea_box
         }))
       });
     } catch (error) {

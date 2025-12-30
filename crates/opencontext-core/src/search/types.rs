@@ -28,6 +28,9 @@ pub struct Chunk {
     /// Entry created timestamp (ISO8601)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entry_created_at: Option<String>,
+    /// Ideas box name (e.g. "inbox")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idea_box: Option<String>,
     /// Index of this chunk within the document
     pub chunk_index: usize,
     /// Embedding vector
@@ -164,6 +167,9 @@ pub struct SearchHit {
     /// Entry created timestamp (ISO8601)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entry_created_at: Option<String>,
+    /// Ideas box name (e.g. "inbox")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idea_box: Option<String>,
 }
 
 /// Search results response

@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "OpenContext",
+    "slug": "opencontext",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow OpenContext to access your photos to attach images."
+        }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.opencontext"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 
 function getHeadingElements(container) {
   if (!container) return [];
@@ -21,8 +21,53 @@ function computeHeadingTops(container, elements) {
  */
 export function useScrollSpy({ containerRef, toc, offset = 120 }) {
   const [activeId, setActiveId] = useState('');
+  const isComposingRef = useRef(false);
+  const pendingIdSyncRef = useRef(false);
 
   const tocIds = useMemo(() => (toc || []).map((t) => String(t?.id || '').trim()).filter(Boolean), [toc]);
+  const tocIdsRef = useRef(tocIds);
+
+  useEffect(() => {
+    tocIdsRef.current = tocIds;
+  }, [tocIds]);
+
+  const syncHeadingIds = useCallback(() => {
+    const container = containerRef?.current;
+    const ids = tocIdsRef.current;
+    if (!container || !ids.length) return;
+    const headings = getHeadingElements(container);
+    const n = Math.min(headings.length, ids.length);
+    for (let i = 0; i < n; i++) {
+      const nextId = ids[i];
+      if (headings[i].getAttribute('data-heading-id') !== nextId) {
+        headings[i].setAttribute('data-heading-id', nextId);
+      }
+    }
+  }, [containerRef]);
+
+  useEffect(() => {
+    const container = containerRef?.current;
+    if (!container) return;
+
+    const handleCompositionStart = () => {
+      isComposingRef.current = true;
+    };
+    const handleCompositionEnd = () => {
+      isComposingRef.current = false;
+      if (pendingIdSyncRef.current) {
+        pendingIdSyncRef.current = false;
+        syncHeadingIds();
+      }
+    };
+
+    container.addEventListener('compositionstart', handleCompositionStart, true);
+    container.addEventListener('compositionend', handleCompositionEnd, true);
+
+    return () => {
+      container.removeEventListener('compositionstart', handleCompositionStart, true);
+      container.removeEventListener('compositionend', handleCompositionEnd, true);
+    };
+  }, [containerRef, syncHeadingIds]);
 
   // Ensure DOM headings have stable identifiers that match toc order.
   useEffect(() => {
@@ -32,15 +77,15 @@ export function useScrollSpy({ containerRef, toc, offset = 120 }) {
 
     // Wait a tick for Plate layout to settle.
     const t = setTimeout(() => {
-      const headings = getHeadingElements(container);
-      const n = Math.min(headings.length, tocIds.length);
-      for (let i = 0; i < n; i++) {
-        headings[i].setAttribute('data-heading-id', tocIds[i]);
+      if (isComposingRef.current) {
+        pendingIdSyncRef.current = true;
+        return;
       }
+      syncHeadingIds();
     }, 0);
 
     return () => clearTimeout(t);
-  }, [containerRef, tocIds]);
+  }, [containerRef, tocIds, syncHeadingIds]);
 
   useEffect(() => {
     const container = containerRef?.current;
@@ -130,5 +175,3 @@ export function pickActiveHeadingId(headings, scrollTop, offset = 120) {
   }
   return lastPassed;
 }
-
-

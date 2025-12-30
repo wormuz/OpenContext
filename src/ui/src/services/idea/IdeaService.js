@@ -54,8 +54,8 @@ export class IdeaService {
    * 获取所有 Threads
    * @returns {Promise<Thread[]>}
    */
-  async getAllThreads() {
-    return this.adapter.listThreads();
+  async getAllThreads(filter = {}) {
+    return this.adapter.listThreads(filter);
   }
 
   /**
@@ -63,8 +63,8 @@ export class IdeaService {
    * @param {string} date - 日期 (YYYY-MM-DD)
    * @returns {Promise<Thread[]>}
    */
-  async getThreadsByDate(date) {
-    return this.adapter.listThreads({ date });
+  async getThreadsByDate(date, options = {}) {
+    return this.adapter.listThreads({ date, ...options });
   }
 
   /**
@@ -72,8 +72,8 @@ export class IdeaService {
    * @param {string} keyword - 搜索关键词
    * @returns {Promise<Thread[]>}
    */
-  async searchThreads(keyword) {
-    return this.adapter.listThreads({ search: keyword });
+  async searchThreads(keyword, options = {}) {
+    return this.adapter.listThreads({ search: keyword, ...options });
   }
 
   /**
@@ -100,6 +100,7 @@ export class IdeaService {
       title: options.title,
       isAI: options.isAI || false,
       images: options.images || [],
+      box: options.box,
     });
   }
 
@@ -147,6 +148,52 @@ export class IdeaService {
    */
   async deleteEntry(entryId) {
     return this.adapter.deleteEntry(entryId);
+  }
+
+  /**
+   * 获取 Ideas Box 列表
+   * @returns {Promise<string[]>}
+   */
+  async listBoxes() {
+    return this.adapter.listBoxes();
+  }
+
+  /**
+   * 创建 Ideas Box
+   * @param {string} name
+   * @returns {Promise<string>}
+   */
+  async createBox(name) {
+    return this.adapter.createBox(name);
+  }
+
+  /**
+   * 重命名 Ideas Box
+   * @param {string} oldName
+   * @param {string} newName
+   * @returns {Promise<string>}
+   */
+  async renameBox(oldName, newName) {
+    return this.adapter.renameBox(oldName, newName);
+  }
+
+  /**
+   * 删除 Ideas Box
+   * @param {string} name
+   * @returns {Promise<void>}
+   */
+  async deleteBox(name) {
+    return this.adapter.deleteBox(name);
+  }
+
+  /**
+   * 移动 Thread 到指定 Box
+   * @param {string} threadId
+   * @param {string} targetBox
+   * @returns {Promise<string>} 新的 thread 路径
+   */
+  async moveThread(threadId, targetBox) {
+    return this.adapter.moveThread(threadId, targetBox);
   }
 
   /**
@@ -240,4 +287,3 @@ export class IdeaService {
 }
 
 export default IdeaService;
-

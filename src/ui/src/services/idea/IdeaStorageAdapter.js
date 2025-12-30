@@ -85,6 +85,52 @@ export class IdeaStorageAdapter {
   }
 
   /**
+   * 获取 Ideas Box 列表
+   * @returns {Promise<string[]>}
+   */
+  async listBoxes() {
+    throw new Error('listBoxes must be implemented');
+  }
+
+  /**
+   * 创建 Ideas Box
+   * @param {string} name
+   * @returns {Promise<string>}
+   */
+  async createBox(name) {
+    throw new Error('createBox must be implemented');
+  }
+
+  /**
+   * 重命名 Ideas Box
+   * @param {string} oldName
+   * @param {string} newName
+   * @returns {Promise<string>}
+   */
+  async renameBox(oldName, newName) {
+    throw new Error('renameBox must be implemented');
+  }
+
+  /**
+   * 删除 Ideas Box
+   * @param {string} name
+   * @returns {Promise<void>}
+   */
+  async deleteBox(name) {
+    throw new Error('deleteBox must be implemented');
+  }
+
+  /**
+   * 移动 Thread 到指定 Box
+   * @param {string} threadId
+   * @param {string} targetBox
+   * @returns {Promise<string>} 新的 thread 路径
+   */
+  async moveThread(threadId, targetBox) {
+    throw new Error('moveThread must be implemented');
+  }
+
+  /**
    * 同步数据（用于云端同步）
    * @returns {Promise<{synced: number, conflicts: number}>}
    */
@@ -103,4 +149,3 @@ export class IdeaStorageAdapter {
 }
 
 export default IdeaStorageAdapter;
-

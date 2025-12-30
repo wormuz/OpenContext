@@ -46,11 +46,15 @@ function formatDateKey(dateInput) {
 
 // ============ Reducer ============
 
+const DEFAULT_BOX = 'inbox';
+
 const initialState = {
   threads: [],
+  boxes: [DEFAULT_BOX],
   isLoading: false,
   error: null,
   selectedDate: formatDateKey(new Date()),
+  selectedBox: DEFAULT_BOX,
 };
 
 function reducer(state, action) {
@@ -59,10 +63,14 @@ function reducer(state, action) {
       return { ...state, isLoading: true, error: null };
     case 'LOAD_SUCCESS':
       return { ...state, threads: action.threads, isLoading: false };
+    case 'LOAD_BOXES':
+      return { ...state, boxes: action.boxes };
     case 'LOAD_ERROR':
       return { ...state, error: action.error, isLoading: false };
     case 'SET_SELECTED_DATE':
       return { ...state, selectedDate: action.date };
+    case 'SET_SELECTED_BOX':
+      return { ...state, selectedBox: action.box };
     case 'UPDATE_THREAD':
       return {
         ...state,
@@ -87,6 +95,11 @@ function reducer(state, action) {
 export function useIdeaLoader({ api }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const loadingRef = useRef(false);
+  const stateRef = useRef(state);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
   
   // 创建 Service 实例（使用 LocalStorageAdapter）
   const serviceRef = useRef(null);
@@ -95,6 +108,54 @@ export function useIdeaLoader({ api }) {
     serviceRef.current = new IdeaService(adapter);
   }
   const service = serviceRef.current;
+
+  const resolveThreadBox = useCallback((thread) => {
+    if (thread?._box) return thread._box;
+    const path = thread?._path || thread?.id || '';
+    if (!path) return DEFAULT_BOX;
+    const normalized = path.startsWith('.ideas/') ? path.slice('.ideas/'.length) : path;
+    const first = normalized.split('/').filter(Boolean)[0] || '';
+    if (/^\d{4}$/.test(first)) return DEFAULT_BOX;
+    return first || DEFAULT_BOX;
+  }, []);
+
+  const normalizeBoxes = useCallback((boxes = []) => {
+    const unique = new Set([DEFAULT_BOX, ...boxes].filter(Boolean));
+    const list = Array.from(unique);
+    const rest = list.filter((box) => box !== DEFAULT_BOX).sort();
+    return [DEFAULT_BOX, ...rest];
+  }, []);
+
+  const deriveBoxesFromThreads = useCallback((threads = []) => {
+    const boxes = new Set([DEFAULT_BOX]);
+    threads.forEach((thread) => {
+      boxes.add(resolveThreadBox(thread));
+    });
+    boxes.add(stateRef.current.selectedBox || DEFAULT_BOX);
+    return normalizeBoxes(Array.from(boxes));
+  }, [normalizeBoxes, resolveThreadBox]);
+
+  const loadBoxes = useCallback(async (threads = null, include = []) => {
+    const includeBoxes = Array.isArray(include) ? include : [include];
+    const threadSource = threads || stateRef.current.threads;
+    try {
+      const boxes = await service.listBoxes();
+      const normalized = normalizeBoxes([
+        ...boxes,
+        ...deriveBoxesFromThreads(threadSource),
+        ...includeBoxes,
+      ]);
+      dispatch({ type: 'LOAD_BOXES', boxes: normalized });
+      return normalized;
+    } catch {
+      const derived = normalizeBoxes([
+        ...deriveBoxesFromThreads(threadSource),
+        ...includeBoxes,
+      ]);
+      dispatch({ type: 'LOAD_BOXES', boxes: derived });
+      return derived;
+    }
+  }, [service, deriveBoxesFromThreads, normalizeBoxes]);
 
   // ---- 加载所有 Threads ----
   const loadThreads = useCallback(async () => {
@@ -105,12 +166,13 @@ export function useIdeaLoader({ api }) {
     try {
       const threads = await service.getAllThreads();
       dispatch({ type: 'LOAD_SUCCESS', threads });
+      loadBoxes(threads);
     } catch (err) {
       dispatch({ type: 'LOAD_ERROR', error: err.message });
     } finally {
       loadingRef.current = false;
     }
-  }, [service]);
+  }, [service, loadBoxes]);
 
   // ---- 初始加载 ----
   useEffect(() => {
@@ -122,10 +184,18 @@ export function useIdeaLoader({ api }) {
     dispatch({ type: 'SET_SELECTED_DATE', date });
   }, []);
 
+  const setSelectedBox = useCallback((box) => {
+    dispatch({ type: 'SET_SELECTED_BOX', box: box || DEFAULT_BOX });
+  }, []);
+
+  const threadsForBox = useMemo(() => {
+    return state.threads.filter((thread) => resolveThreadBox(thread) === state.selectedBox);
+  }, [state.threads, state.selectedBox, resolveThreadBox]);
+
   // ---- 按天分组的数据 ----
   const threadsByDate = useMemo(() => {
     const groups = new Map();
-    state.threads.forEach(thread => {
+    threadsForBox.forEach(thread => {
       const date = thread._date || formatDateKey(thread.createdAt);
       if (!groups.has(date)) {
         groups.set(date, []);
@@ -133,12 +203,40 @@ export function useIdeaLoader({ api }) {
       groups.get(date).push(thread);
     });
     return groups;
-  }, [state.threads]);
+  }, [threadsForBox]);
+
+  const availableDatesByBox = useMemo(() => {
+    const byBox = new Map();
+    state.boxes.forEach((box) => {
+      byBox.set(box, new Set());
+    });
+    state.threads.forEach((thread) => {
+      const box = resolveThreadBox(thread);
+      const date = thread._date || formatDateKey(thread.createdAt);
+      if (!byBox.has(box)) {
+        byBox.set(box, new Set());
+      }
+      byBox.get(box).add(date);
+    });
+    const result = {};
+    byBox.forEach((dates, box) => {
+      result[box] = Array.from(dates).sort().reverse();
+    });
+    return result;
+  }, [state.boxes, state.threads, resolveThreadBox]);
 
   // ---- 获取可用的日期列表 ----
   const availableDates = useMemo(() => {
     return Array.from(threadsByDate.keys()).sort().reverse();
   }, [threadsByDate]);
+
+  useEffect(() => {
+    if (!state.selectedDate) return;
+    const today = formatDateKey(new Date());
+    if (!availableDates.includes(state.selectedDate) && state.selectedDate !== today) {
+      setSelectedDate(today);
+    }
+  }, [availableDates, setSelectedDate, state.selectedDate, state.selectedBox]);
 
   // ---- 获取当前日期的 entries ----
   const currentDayEntries = useMemo(() => {
@@ -162,7 +260,7 @@ export function useIdeaLoader({ api }) {
     return entries.sort((a, b) => 
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
-  }, [state.threads, state.selectedDate, threadsByDate]);
+  }, [state.selectedDate, threadsByDate]);
 
   // ---- 获取所有 entries，按日期分组 ----
   // 设计：同一个 thread 内的 entries 按创建时间正序显示，thread 之间按最新活跃时间倒序
@@ -171,7 +269,7 @@ export function useIdeaLoader({ api }) {
     const yesterday = formatDateKey(new Date(Date.now() - 86400000));
 
     // Step 1: 计算每个 thread 的最新 entry 时间（用于排序）
-    const threadsWithLatestTime = state.threads.map(thread => {
+    const threadsWithLatestTime = threadsForBox.map(thread => {
       const latestEntry = thread.entries[thread.entries.length - 1];
       return {
         ...thread,
@@ -216,7 +314,7 @@ export function useIdeaLoader({ api }) {
         entries, // 保持已排好的顺序
       }))
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [state.threads]);
+  }, [threadsForBox]);
 
   // ---- 添加新想法（创建新 Thread）----
   const addEntry = useCallback(
@@ -228,6 +326,7 @@ export function useIdeaLoader({ api }) {
           title: options.title,
           isAI: options.isAI,
           images: options.images || [],
+          box: state.selectedBox,
         });
 
         // 更新本地状态
@@ -247,7 +346,7 @@ export function useIdeaLoader({ api }) {
         throw err;
       }
     },
-    [service, state.selectedDate, setSelectedDate]
+    [service, state.selectedBox, state.selectedDate, setSelectedDate]
   );
 
   // ---- 在指定 Thread 中继续添加 Entry ----
@@ -338,6 +437,51 @@ export function useIdeaLoader({ api }) {
     [service, loadThreads, state.threads]
   );
 
+  const createBox = useCallback(
+    async (name) => {
+      const boxName = await service.createBox(name);
+      await loadBoxes(null, [boxName]);
+      dispatch({ type: 'SET_SELECTED_BOX', box: boxName });
+      return boxName;
+    },
+    [service, loadBoxes]
+  );
+
+  const renameBox = useCallback(
+    async (oldName, newName) => {
+      if (!oldName || oldName === DEFAULT_BOX) return DEFAULT_BOX;
+      const boxName = await service.renameBox(oldName, newName);
+      await loadBoxes(null, [boxName]);
+      if (stateRef.current.selectedBox === oldName) {
+        dispatch({ type: 'SET_SELECTED_BOX', box: boxName });
+      }
+      return boxName;
+    },
+    [service, loadBoxes]
+  );
+
+  const deleteBox = useCallback(
+    async (name) => {
+      if (!name || name === DEFAULT_BOX) return;
+      await service.deleteBox(name);
+      await loadBoxes();
+      if (stateRef.current.selectedBox === name) {
+        dispatch({ type: 'SET_SELECTED_BOX', box: DEFAULT_BOX });
+      }
+      await loadThreads();
+    },
+    [service, loadBoxes, loadThreads]
+  );
+
+  const moveThread = useCallback(
+    async (threadId, targetBox) => {
+      const nextPath = await service.moveThread(threadId, targetBox);
+      await loadThreads();
+      return nextPath;
+    },
+    [service, loadThreads]
+  );
+
   // ---- 刷新数据 ----
   const refresh = useCallback(() => {
     loadThreads();
@@ -354,18 +498,26 @@ export function useIdeaLoader({ api }) {
     isLoading: state.isLoading,
     error: state.error,
     selectedDate: state.selectedDate,
+    selectedBox: state.selectedBox,
+    boxes: state.boxes,
     // Derived
     threadsByDate,
     availableDates,
+    availableDatesByBox,
     currentDayEntries,
     allEntriesGrouped,
     // Actions
     setSelectedDate,
+    setSelectedBox,
     addEntry,
     continueThread,
     addAIReflection,
     deleteEntry,
     deleteThread,
+    createBox,
+    renameBox,
+    deleteBox,
+    moveThread,
     refresh,
     // Service Info
     storageType,

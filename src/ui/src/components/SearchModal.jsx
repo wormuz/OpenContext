@@ -48,15 +48,43 @@ function HighlightText({ text, query, maxLength = 200 }) {
   );
 }
 
+function normalizeIdeaTitleFromContent(content, maxLength = 48) {
+  const raw = String(content || '').trim();
+  if (!raw) return '';
+  const firstLine = raw.split(/\r?\n/).find((line) => line.trim()) || raw;
+  const normalized = firstLine.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+}
+
+function isIdeaHit(hit) {
+  const docType = hit?.doc_type || hit?.docType;
+  if (docType) return docType === 'idea';
+  const filePath = String(hit?.file_path || hit?.filePath || '');
+  return filePath.startsWith('.ideas/');
+}
+
+function getIdeaDisplayName(result, untitledLabel) {
+  const candidate = String(result?.display_name || result?.title || '').trim();
+  if (candidate && candidate !== untitledLabel) return candidate;
+  const fromContent = normalizeIdeaTitleFromContent(result?.content);
+  return fromContent || untitledLabel;
+}
+
 // Search result item
 function SearchResultItem({ result, query, isSelected, onClick }) {
   const { t } = useTranslation();
   const isIdea = result.kind === 'idea';
   const isFolder = result.folder_path !== undefined && result.aggregate_type === 'folder';
   const displayPath = result.file_path || result.folder_path || '';
-  const displayName = result.display_name || result.title || displayPath.split('/').pop()?.replace('.md', '') || t('search.untitled');
+  const untitledLabel = t('search.untitled');
+  const displayName = isIdea
+    ? getIdeaDisplayName(result, untitledLabel)
+    : (result.display_name || result.title || displayPath.split('/').pop()?.replace('.md', '') || untitledLabel);
+  const ideaBox = isIdea ? result.ideaBox || result.idea_box : '';
+  const ideaBoxLabel = ideaBox === 'inbox' ? t('idea.boxInbox', 'Inbox') : ideaBox;
   const ideaMeta = isIdea
-    ? [t('search.ideas', 'Ideas'), result.relativeTime].filter(Boolean).join(' · ')
+    ? [t('search.ideas', 'Ideas'), ideaBoxLabel, result.relativeTime].filter(Boolean).join(' · ')
     : '';
 
   // Format heading path for display - Notion style breadcrumbs
@@ -227,20 +255,23 @@ export function SearchModal({ isOpen, onClose, onSelectDoc, onSelectIdea }) {
           });
         }
 
-        const normalizedIdeas = (ideaResponse.results || []).map((hit) => {
-          const createdAt = hit.entry_created_at || '';
-          const date = hit.entry_date || (createdAt ? formatDateKey(createdAt) : '');
-          return {
-            kind: 'idea',
-            threadId: hit.file_path,
-            entryId: hit.entry_id || '',
-            date,
-            title: hit.display_name || t('search.untitled'),
-            content: hit.content || '',
-            updatedAt: createdAt,
-            relativeTime: createdAt ? formatRelativeTime(createdAt) : '',
-          };
-        });
+        const normalizedIdeas = (ideaResponse.results || [])
+          .filter(isIdeaHit)
+          .map((hit) => {
+            const createdAt = hit.entry_created_at || '';
+            const date = hit.entry_date || (createdAt ? formatDateKey(createdAt) : '');
+            return {
+              kind: 'idea',
+              threadId: hit.file_path,
+              entryId: hit.entry_id || '',
+              date,
+              title: hit.display_name || hit.title || '',
+              content: hit.content || '',
+              updatedAt: createdAt,
+              relativeTime: createdAt ? formatRelativeTime(createdAt) : '',
+              ideaBox: hit.idea_box || hit.ideaBox || '',
+            };
+          });
 
         setResults(docResponse.results || []);
         setIdeaResults(normalizedIdeas);

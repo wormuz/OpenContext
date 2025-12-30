@@ -4,7 +4,7 @@
  * 使用本地文件系统存储 Ideas，兼容当前的 Markdown 格式
  * 
  * 存储格式：
- * - 目录结构：.ideas/{year}/{month}/{date}-{slug}-{timestamp}.md
+ * - 目录结构：.ideas/{box}/{year}/{month}/{date}-{slug}-{timestamp}.md
  * - 文件格式：Markdown with hidden markers for entry metadata
  */
 
@@ -13,6 +13,7 @@ import { IdeaStorageAdapter } from './IdeaStorageAdapter';
 // ============ 常量 ============
 
 const IDEAS_ROOT = '.ideas';
+const DEFAULT_BOX = 'inbox';
 
 // Entry marker 正则：[//]: # (idea:id=xxx created_at=xxx [is_ai=true])
 const ENTRY_MARKER_REGEX = /^\[\/\/\]: # \(idea:id=([a-f0-9-]+) created_at=([^\s)]+)(?:\s+is_ai=(\w+))?\)\s*$/;
@@ -60,7 +61,15 @@ function slugify(text) {
     .slice(0, 30) || 'untitled';
 }
 
-function generateThreadPath(title) {
+function sanitizeBoxName(name) {
+  const value = String(name || '').trim();
+  if (!value) return DEFAULT_BOX;
+  if (value.includes('/') || value.includes('\\')) return DEFAULT_BOX;
+  return value;
+}
+
+function generateThreadPath(title, box = DEFAULT_BOX) {
+  const safeBox = sanitizeBoxName(box);
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -69,7 +78,7 @@ function generateThreadPath(title) {
   const slug = slugify(title);
   const timestamp = Date.now().toString(36);
   
-  return `${IDEAS_ROOT}/${year}/${month}/${datePrefix}-${slug}-${timestamp}.md`;
+  return `${IDEAS_ROOT}/${safeBox}/${year}/${month}/${datePrefix}-${slug}-${timestamp}.md`;
 }
 
 function extractTitleFromPath(path) {
@@ -88,6 +97,24 @@ function extractDateFromPath(path) {
     return `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
   }
   return null;
+}
+
+function stripIdeasRoot(path) {
+  if (!path) return '';
+  return path.startsWith(`${IDEAS_ROOT}/`) ? path.slice(`${IDEAS_ROOT}/`.length) : path;
+}
+
+function isLegacyThreadPath(path) {
+  const relPath = stripIdeasRoot(path);
+  return /^\d{4}\/\d{2}\//.test(relPath);
+}
+
+function extractBoxFromPath(path) {
+  const relPath = stripIdeasRoot(path);
+  const parts = relPath.split('/').filter(Boolean);
+  if (parts.length === 0) return DEFAULT_BOX;
+  if (/^\d{4}$/.test(parts[0])) return DEFAULT_BOX;
+  return parts[0] || DEFAULT_BOX;
 }
 
 /**
@@ -211,6 +238,33 @@ export class LocalStorageAdapter extends IdeaStorageAdapter {
     } catch {
       // 目录可能已存在，忽略
     }
+    try {
+      await this.api.createFolder(`${this.ideasRoot}/${DEFAULT_BOX}`, 'Default ideas box');
+    } catch {
+      // ignore
+    }
+  }
+
+  async migrateLegacyThreads() {
+    const docs = await this.api.listDocs(this.ideasRoot, true);
+    if (!docs || docs.length === 0) return;
+    for (const doc of docs) {
+      const relPath = doc?.rel_path || '';
+      if (!isLegacyThreadPath(relPath)) continue;
+      const restPath = stripIdeasRoot(relPath);
+      const destPath = `${this.ideasRoot}/${DEFAULT_BOX}/${restPath}`;
+      const destFolder = destPath.split('/').slice(0, -1).join('/');
+      try {
+        await this.api.createFolder(destFolder, '');
+      } catch {
+        // ignore
+      }
+      try {
+        await this.api.moveDoc(relPath, destFolder);
+      } catch {
+        // ignore failed migration
+      }
+    }
   }
 
   /**
@@ -218,11 +272,13 @@ export class LocalStorageAdapter extends IdeaStorageAdapter {
    */
   async listThreads(filter = {}) {
     await this.ensureRootFolder();
-
+    await this.migrateLegacyThreads();
     const docs = await this.api.listDocs(this.ideasRoot, true);
     
     const threads = await Promise.all(
-      (docs || []).map(async (doc) => {
+      (docs || [])
+        .filter((doc) => String(doc?.rel_path || '').toLowerCase().endsWith('.md'))
+        .map(async (doc) => {
         try {
           const { content } = await this.api.getDocContent(doc.rel_path);
           const entries = parseThreadDocument(content);
@@ -245,6 +301,7 @@ export class LocalStorageAdapter extends IdeaStorageAdapter {
             // 保留原始 path 信息
             _path: doc.rel_path,
             _date: extractDateFromPath(doc.rel_path),
+            _box: extractBoxFromPath(doc.rel_path),
           };
         } catch {
           return null;
@@ -265,6 +322,10 @@ export class LocalStorageAdapter extends IdeaStorageAdapter {
         t.title.toLowerCase().includes(keyword) ||
         t.entries.some(e => e.content.toLowerCase().includes(keyword))
       );
+    }
+
+    if (filter.box) {
+      result = result.filter(t => (t._box || DEFAULT_BOX) === filter.box);
     }
 
     return result;
@@ -294,6 +355,7 @@ export class LocalStorageAdapter extends IdeaStorageAdapter {
         entries: entriesWithThreadId,
         _path: threadId,
         _date: extractDateFromPath(threadId),
+        _box: extractBoxFromPath(threadId),
       };
     } catch {
       return null;
@@ -304,11 +366,11 @@ export class LocalStorageAdapter extends IdeaStorageAdapter {
    * 创建新 Thread
    */
   async createThread(input) {
-    const { content, title, isAI = false, images = [] } = input;
+    const { content, title, isAI = false, images = [], box = DEFAULT_BOX } = input;
     
     const now = new Date().toISOString();
     const entryId = generateEntryId();
-    const threadPath = generateThreadPath(title || content.slice(0, 20) || 'image');
+    const threadPath = generateThreadPath(title || content.slice(0, 20) || 'image', box);
     const folderPath = threadPath.split('/').slice(0, -1).join('/');
     const fileName = threadPath.split('/').pop();
 
@@ -342,6 +404,7 @@ export class LocalStorageAdapter extends IdeaStorageAdapter {
       entries: [firstEntry],
       _path: threadPath,
       _date: formatDateKey(now),
+      _box: extractBoxFromPath(threadPath),
     };
   }
 
@@ -436,6 +499,68 @@ export class LocalStorageAdapter extends IdeaStorageAdapter {
     }
 
     throw new Error(`Entry not found: ${entryId}`);
+  }
+
+  async listBoxes() {
+    await this.ensureRootFolder();
+    const folders = await this.api.listFolders({ all: true });
+    const boxes = (folders || [])
+      .map((folder) => folder?.rel_path || '')
+      .filter((relPath) => relPath && (relPath === this.ideasRoot || relPath.startsWith(`${this.ideasRoot}/`)))
+      .map((relPath) => {
+        if (relPath === this.ideasRoot) return '';
+        return relPath.slice(`${this.ideasRoot}/`.length);
+      })
+      .map((name) => name.split('/')[0])
+      .filter(Boolean)
+      .filter((name) => !/^\d{4}$/.test(name));
+
+    const unique = new Set([DEFAULT_BOX, ...boxes]);
+    const list = Array.from(unique);
+    const rest = list.filter((name) => name !== DEFAULT_BOX).sort();
+    return [DEFAULT_BOX, ...rest];
+  }
+
+  async createBox(name) {
+    const safeName = sanitizeBoxName(name);
+    await this.ensureRootFolder();
+    await this.api.createFolder(`${this.ideasRoot}/${safeName}`, '');
+    return safeName;
+  }
+
+  async renameBox(oldName, newName) {
+    const safeName = sanitizeBoxName(newName);
+    if (!oldName || oldName === safeName) return safeName;
+    await this.ensureRootFolder();
+    await this.api.renameFolder(`${this.ideasRoot}/${oldName}`, safeName);
+    return safeName;
+  }
+
+  async deleteBox(name) {
+    if (!name) return;
+    await this.api.removeFolder(`${this.ideasRoot}/${name}`, true);
+  }
+
+  async moveThread(threadId, targetBox) {
+    const safeTarget = sanitizeBoxName(targetBox);
+    const relPath = stripIdeasRoot(threadId);
+    if (!relPath) return threadId;
+    const parts = relPath.split('/').filter(Boolean);
+    const restPath = /^\d{4}$/.test(parts[0]) ? relPath : parts.slice(1).join('/');
+    const destPath = `${this.ideasRoot}/${safeTarget}/${restPath}`;
+    const destFolder = destPath.split('/').slice(0, -1).join('/');
+    try {
+      await this.api.createFolder(`${this.ideasRoot}/${safeTarget}`, '');
+    } catch {
+      // ignore
+    }
+    try {
+      await this.api.createFolder(destFolder, '');
+    } catch {
+      // ignore
+    }
+    await this.api.moveDoc(threadId, destFolder);
+    return destPath;
   }
 }
 

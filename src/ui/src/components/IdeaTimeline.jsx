@@ -25,12 +25,14 @@ import { buildIdeaRefUrl, parseIdeaRefUrl } from '../utils/ideaRef';
 
 export default function IdeaTimeline({
   selectedDate,
+  selectedBox,
   allEntriesGrouped,
   isLoading,
   onAddEntry,
   onContinueThread,
   onAddAIReflection,
   onDeleteEntry,
+  onRequestMoveThread,
   onOpenDocById,
   onOpenIdeaRef,
   focusEntryId,
@@ -38,6 +40,7 @@ export default function IdeaTimeline({
   onRefresh,
 }) {
   const { t } = useTranslation();
+  const boxLabel = selectedBox === 'inbox' ? t('idea.boxInbox', 'Inbox') : (selectedBox || '');
   const { isAvailable: isAIAvailable, generateReflection, isGenerating } = useAI();
   const [inputText, setInputText] = useState('');
   const [inputImages, setInputImages] = useState([]);
@@ -644,6 +647,12 @@ export default function IdeaTimeline({
         <div className="flex items-center gap-2 text-sm text-gray-400 font-medium">
           <span>{t('idea.title', '想法')}</span>
           <span>/</span>
+          {boxLabel ? (
+            <>
+              <span className="text-gray-600 uppercase tracking-wider text-xs">{boxLabel}</span>
+              <span>/</span>
+            </>
+          ) : null}
           <span className="text-gray-900 uppercase tracking-wider text-xs">
             {formatDateDisplay(selectedDate)}
           </span>
@@ -886,6 +895,17 @@ export default function IdeaTimeline({
                                           <SparklesIcon className="w-3 h-3" />
                                           <span>{t('idea.reflect', 'AI思考')}</span>
                             </button>
+                                        {onRequestMoveThread ? (
+                                          <>
+                                            <span className="text-gray-200">·</span>
+                                            <button
+                                              onClick={() => onRequestMoveThread({ threadId: e.threadId, threadTitle: e.threadTitle })}
+                                              className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+                                            >
+                                              {t('idea.moveThread', '移动')}
+                                            </button>
+                                          </>
+                                        ) : null}
                           </div>
                         )}
                       </div>
