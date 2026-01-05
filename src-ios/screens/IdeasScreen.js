@@ -19,6 +19,7 @@ const {
   Keyboard,
   Platform,
 } = require('react-native');
+const { Swipeable } = require('react-native-gesture-handler');
 const { useTranslation } = require('react-i18next');
 const ImagePicker = require('expo-image-picker');
 const Screen = require('../components/Screen');
@@ -419,6 +420,45 @@ function IdeasScreen({ navigation }) {
     );
   }, [confirmDeleteEntry, confirmDeleteThread, threads, t]);
 
+  const renderSwipeActions = React.useCallback((entry, progress) => {
+    const opacity = progress.interpolate({
+      inputRange: [0, 0.4, 1],
+      outputRange: [0, 0.7, 1],
+      extrapolate: 'clamp',
+    });
+    const translateX = progress.interpolate({
+      inputRange: [0, 1],
+      outputRange: [12, 0],
+      extrapolate: 'clamp',
+    });
+    const scale = progress.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.96, 1],
+      extrapolate: 'clamp',
+    });
+
+    return (
+      <View style={styles.swipeActions}>
+        <Pressable
+          style={styles.swipeDeletePressable}
+          onPress={() => handleEntryActions(entry)}
+        >
+          <Animated.View
+            style={[
+              styles.swipeDelete,
+              {
+                opacity,
+                transform: [{ translateX }, { scale }],
+              },
+            ]}
+          >
+            <Text style={styles.swipeDeleteText}>{t('common.delete')}</Text>
+          </Animated.View>
+        </Pressable>
+      </View>
+    );
+  }, [handleEntryActions, t]);
+
   const validateBoxName = React.useCallback((value) => {
     const name = String(value || '').trim();
     if (!name) return null;
@@ -681,76 +721,75 @@ function IdeasScreen({ navigation }) {
               )}
               renderItem={({ item }) => (
                 <AnimatedEntry isActive={item.id === lastAddedEntryId}>
-                  <View style={item.isLastInThread ? styles.entryBlockLast : null}>
-                    <View style={styles.entryRow}>
-                      <View style={styles.leftCol}>
-                        {!item.isFirstInThread && (
-                          <View style={[styles.lineTop, styles.lineUser]} />
-                        )}
-                        {!item.isLastInThread
-                        || replyingThreadId === item.threadId
-                        || reflectingThreadId === item.threadId ? (
-                          <View style={[styles.lineBottom, styles.lineUser]} />
-                        ) : null}
-                        <View style={[styles.ball, item.isAI ? styles.ballAi : styles.ballUser]}>
-                          {item.isAI ? <AiSparkle /> : null}
-                        </View>
-                      </View>
-                      <View style={styles.entryRight}>
-                        <View style={styles.entryHeader}>
-                          <View style={styles.entryBody}>
-                            <Text style={[styles.entryText, item.isAI ? styles.entryTextAi : null]}>
-                              {item.content}
-                            </Text>
-                            {item.images?.length ? (
-                              <View style={styles.entryImages}>
-                                {item.images.map((uri, index) => (
-                                  <Image
-                                    key={`${item.id}-img-${index}`}
-                                    source={{ uri }}
-                                    style={styles.entryImage}
-                                  />
-                                ))}
-                              </View>
-                            ) : null}
-                            {item.isLastInThread && replyingThreadId !== item.threadId && reflectingThreadId !== item.threadId ? (
-                              <View style={styles.actionRow}>
-                                <Pressable
-                                  onPress={() => handleStartContinue(item.threadId)}
-                                  style={styles.continueButton}
-                                >
-                                  <Text style={styles.continueText}>{t('ideas.continue')}</Text>
-                                </Pressable>
-                                <Pressable
-                                  onPress={() => handleStartReflect(item.threadId)}
-                                  style={styles.aiButton}
-                                >
-                                  <Text style={styles.aiText}>{t('ideas.aiReflect')}</Text>
-                                </Pressable>
-                                <Pressable
-                                  onPress={() => openMoveModal(item.threadId)}
-                                  style={styles.moveButton}
-                                >
-                                  <Text style={styles.moveText}>{t('ideas.boxMove')}</Text>
-                                </Pressable>
-                              </View>
-                            ) : null}
+                  <Swipeable
+                    renderRightActions={(progress) => renderSwipeActions(item, progress)}
+                    overshootRight={false}
+                  >
+                    <View style={item.isLastInThread ? styles.entryBlockLast : null}>
+                      <View style={styles.entryRow}>
+                        <View style={styles.leftCol}>
+                          {!item.isFirstInThread && (
+                            <View style={[styles.lineTop, styles.lineUser]} />
+                          )}
+                          {!item.isLastInThread
+                          || replyingThreadId === item.threadId
+                          || reflectingThreadId === item.threadId ? (
+                            <View style={[styles.lineBottom, styles.lineUser]} />
+                          ) : null}
+                          <View style={[styles.ball, item.isAI ? styles.ballAi : styles.ballUser]}>
+                            {item.isAI ? <AiSparkle /> : null}
                           </View>
-                          <View style={styles.entryMetaRow}>
-                            <Text style={styles.entryMeta}>
-                              {formatRelativeTime(item.createdAt, t)}
-                            </Text>
-                            <Pressable
-                              style={styles.entryMoreButton}
-                              onPress={() => handleEntryActions(item)}
-                            >
-                              <Text style={styles.entryMoreText}>...</Text>
-                            </Pressable>
+                        </View>
+                        <View style={styles.entryRight}>
+                          <View style={styles.entryHeader}>
+                            <View style={styles.entryBody}>
+                              <Text style={[styles.entryText, item.isAI ? styles.entryTextAi : null]}>
+                                {item.content}
+                              </Text>
+                              {item.images?.length ? (
+                                <View style={styles.entryImages}>
+                                  {item.images.map((uri, index) => (
+                                    <Image
+                                      key={`${item.id}-img-${index}`}
+                                      source={{ uri }}
+                                      style={styles.entryImage}
+                                    />
+                                  ))}
+                                </View>
+                              ) : null}
+                              {item.isLastInThread && replyingThreadId !== item.threadId && reflectingThreadId !== item.threadId ? (
+                                <View style={styles.actionRow}>
+                                  <Pressable
+                                    onPress={() => handleStartContinue(item.threadId)}
+                                    style={styles.continueButton}
+                                  >
+                                    <Text style={styles.continueText}>{t('ideas.continue')}</Text>
+                                  </Pressable>
+                                  <Pressable
+                                    onPress={() => handleStartReflect(item.threadId)}
+                                    style={styles.aiButton}
+                                  >
+                                    <Text style={styles.aiText}>{t('ideas.aiReflect')}</Text>
+                                  </Pressable>
+                                  <Pressable
+                                    onPress={() => openMoveModal(item.threadId)}
+                                    style={styles.moveButton}
+                                  >
+                                    <Text style={styles.moveText}>{t('ideas.boxMove')}</Text>
+                                  </Pressable>
+                                </View>
+                              ) : null}
+                            </View>
+                            <View style={styles.entryMetaRow}>
+                              <Text style={styles.entryMeta}>
+                                {formatRelativeTime(item.createdAt, t)}
+                              </Text>
+                            </View>
                           </View>
                         </View>
                       </View>
                     </View>
-                  </View>
+                  </Swipeable>
 
                   {item.isLastInThread && reflectingThreadId === item.threadId ? (
                     <AnimatedEntry isActive>
@@ -1500,16 +1539,6 @@ const styles = StyleSheet.create({
   entryMeta: {
     ...typography.label,
   },
-  entryMoreButton: {
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-  },
-  entryMoreText: {
-    fontFamily: typography.subtitle.fontFamily,
-    fontSize: 16,
-    lineHeight: 16,
-    color: colors.mutedInk,
-  },
   continueText: {
     fontFamily: typography.subtitle.fontFamily,
     fontSize: 11,
@@ -1527,6 +1556,27 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.sm,
     alignItems: 'center',
+  },
+  swipeActions: {
+    width: 80,
+    justifyContent: 'stretch',
+    alignItems: 'stretch',
+    paddingLeft: spacing.sm,
+  },
+  swipeDelete: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ff3b30',
+  },
+  swipeDeletePressable: {
+    flex: 1,
+  },
+  swipeDeleteText: {
+    fontFamily: typography.subtitle.fontFamily,
+    fontSize: 12,
+    color: '#ffffff',
+    fontWeight: '600',
   },
   aiButton: {
     alignSelf: 'flex-start',
