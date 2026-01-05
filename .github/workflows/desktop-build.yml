@@ -170,7 +170,22 @@ jobs:
             echo "No DMG found to verify." >&2
             exit 1
           fi
-          spctl -a -vv "$DMG_PATH"
+          xcrun stapler validate "$DMG_PATH"
+          MOUNT_DIR=$(mktemp -d)
+          cleanup() {
+            if mount | grep -q "$MOUNT_DIR"; then
+              hdiutil detach "$MOUNT_DIR" -quiet || true
+            fi
+            rm -rf "$MOUNT_DIR"
+          }
+          trap cleanup EXIT
+          hdiutil attach "$DMG_PATH" -nobrowse -quiet -mountpoint "$MOUNT_DIR"
+          APP_PATH=$(find "$MOUNT_DIR" -maxdepth 1 -type d -name "*.app" | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app found inside DMG." >&2
+            exit 1
+          fi
+          spctl -a -vv --type execute "$APP_PATH"
 
       - name: Build Tauri app (Windows)
         if: matrix.platform == 'windows-latest'

@@ -719,13 +719,15 @@ function IdeasScreen({ navigation }) {
                   <View style={styles.sectionLine} />
                 </View>
               )}
-              renderItem={({ item }) => (
+              renderItem={({ item }) => {
+                const isReflectingEntry = item.isLastInThread && reflectingThreadId === item.threadId;
+                return (
                 <AnimatedEntry isActive={item.id === lastAddedEntryId}>
                   <Swipeable
                     renderRightActions={(progress) => renderSwipeActions(item, progress)}
                     overshootRight={false}
                   >
-                    <View style={item.isLastInThread ? styles.entryBlockLast : null}>
+                    <View style={!isReflectingEntry && item.isLastInThread ? styles.entryBlockLast : null}>
                       <View style={styles.entryRow}>
                         <View style={styles.leftCol}>
                           {!item.isFirstInThread && (
@@ -791,9 +793,9 @@ function IdeasScreen({ navigation }) {
                     </View>
                   </Swipeable>
 
-                  {item.isLastInThread && reflectingThreadId === item.threadId ? (
+                  {isReflectingEntry ? (
                     <AnimatedEntry isActive>
-                      <View style={styles.entryRow}>
+                      <View style={[styles.entryRow, styles.entryBlockLast]}>
                         <View style={styles.leftCol}>
                           <View style={[styles.lineTop, styles.lineUser]} />
                           <View style={[styles.ball, styles.ballAi]}>
@@ -854,8 +856,9 @@ function IdeasScreen({ navigation }) {
                       </View>
                     </AnimatedEntry>
                   ) : null}
-              </AnimatedEntry>
-              )}
+                </AnimatedEntry>
+                );
+              }}
               contentContainerStyle={styles.list}
             />
           )}
