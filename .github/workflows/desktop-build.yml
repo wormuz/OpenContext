@@ -43,15 +43,7 @@ jobs:
         with:
           tag_name: desktop-v${{ steps.get_version.outputs.version }}
           name: OpenContext Desktop v${{ steps.get_version.outputs.version }}
-          body: |
-            ## OpenContext Desktop v${{ steps.get_version.outputs.version }}
-            
-            ### 下载
-            - **macOS**: 下载 `.dmg` 文件，双击安装
-            - **Windows**: 下载 `.msi` 或 `.exe` 文件安装
-            
-            ### 更新日志
-            请查看 [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
+          generate_release_notes: true
           draft: true
           prerelease: false
 
