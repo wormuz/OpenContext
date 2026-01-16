@@ -1,0 +1,27 @@
+changelog:
+  template: |
+    ## Downloads
+    - **macOS**: Download `.dmg` and double-click to install.
+    - **Windows**: Download `.msi` or `.exe`.
+
+    ## 更新日志
+    $CHANGES
+
+    ## Contributors
+    $CONTRIBUTORS
+  categories:
+    - title: Features
+      labels:
+        - feature
+        - enhancement
+    - title: Bug Fixes
+      labels:
+        - bug
+        - fix
+    - title: Documentation
+      labels:
+        - docs
+        - documentation
+    - title: Other Changes
+      labels:
+        - "*"
