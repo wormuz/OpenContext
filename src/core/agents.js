@@ -177,160 +177,6 @@ function projectAgentsTemplate() {
     '<!-- OPENCONTEXT:END -->'
   ].join('\n');
 }
-const CLAUDE_WORKFLOWS = [
-  {
-    filename: 'oc-help.md',
-    content: `---
-description: Help with OpenContext commands - find docs, load context, create or update documents
----
-
-# OpenContext Help
-
-You are assisting a user who may be new to OpenContext. Route them to the right workflow.
-
-## Available Commands
-
-| Command | Use when... |
-|---------|-------------|
-| \`/oc-search\` | "I want to find what I've written before" |
-| \`/oc-context\` | "I want to load background/context for the current task" |
-| \`/oc-create\` | "I want to create a new doc/idea" |
-| \`/oc-iterate\` | "I want to save/update a doc with what we just learned" |
-
-## Steps
-
-1. Ask the user which of these they want (pick one):
-   - A) Find existing docs → use \`/oc-search\`
-   - B) Load background context → use \`/oc-context\`
-   - C) Create new doc/idea → use \`/oc-create\`
-   - D) Update doc with new insights → use \`/oc-iterate\`
-
-2. If they are unsure, default to \`/oc-context\`.
-
-3. Then run the chosen command and continue the task.
-`
-  },
-  {
-    filename: 'oc-context.md',
-    content: `---
-description: Load context from OpenContext for the current task
----
-
-# Load OpenContext for current task
-
-Goal: Load enough context from OpenContext so you can proceed confidently.
-Safety: Do NOT trigger index builds by default (no \`oc index build\`). Prefer manifest + direct reads.
-
-## Steps
-
-1. If the target space/folder is unclear, run \`oc folder ls --all\` and ask the user to choose a folder (no guessing when ambiguous).
-2. Run \`oc context manifest <folder_path> --llm --limit 10\` to get the manifest.
-3. Load 3-10 relevant files by \`abs_path\` using the Read tool and extract:
-   - Key constraints, decisions, and current state
-   - Open questions / risks
-4. Cite sources:
-   - Prefer stable links \`oc://doc/<stable_id>\` when available in the manifest output.
-   - Use \`abs_path\` + \`range\` only for line-level evidence.
-5. Summarize the loaded context and proceed with the user's task.
-`
-  },
-  {
-    filename: 'oc-search.md',
-    content: `---
-description: Search OpenContext documents by query
----
-
-# Search OpenContext docs
-
-Goal: Help the user find relevant existing docs quickly.
-Safety: Do NOT trigger index builds by default.
-
-## Steps
-
-1. Ask the user for a short query (or infer one from the conversation).
-
-2. Try search in read-only mode:
-   \`\`\`bash
-   oc search "<query>" --format json --limit 10
-   \`\`\`
-
-3. If search succeeds, use results to pick candidate docs, then load and cite them.
-
-4. If search fails due to missing index:
-   - Fall back to \`oc context manifest <folder> --llm --limit 20\` and use doc \`description\` + filename triage.
-   - Optionally suggest index build, but do NOT run unless user explicitly approves.
-
-5. Cite sources using stable links \`oc://doc/<stable_id>\` when available.
-`
-  },
-  {
-    filename: 'oc-create.md',
-    content: `---
-description: Create a new document in OpenContext
----
-
-# Create new OpenContext document
-
-Goal: Create a new idea or problem statement inside OpenContext.
-
-## Steps
-
-0. **Blocking requirement**: Do NOT answer the user's broader question until the document has been created and minimally populated.
-
-1. Infer the target space from recent context; if unclear, ask the user to specify the space.
-
-2. Derive a concise idea title & summary from the current conversation, then generate a slug (kebab-case; fallback to \`idea-<YYYYMMDDHHmm>\`). Only ask the user if information is insufficient.
-
-3. Determine the target folder path under OpenContext:
-   - If the user gave a target folder, use it.
-   - Otherwise, infer a sensible default and confirm with the user.
-   - If unsure what folders exist, run \`oc folder ls --all\` and pick/ask accordingly.
-
-4. Ensure the target folder exists:
-   \`\`\`bash
-   oc folder create <folder_path> -d "<folder description>"
-   \`\`\`
-
-5. **[CRITICAL]** Create the document using oc CLI (NOT Write tool):
-   \`\`\`bash
-   oc doc create <folder_path> <slug>.md -d "<title>"
-   \`\`\`
-
-6. After \`oc doc create\` succeeds, edit the file at \`$HOME/.opencontext/contexts/<folder_path>/<slug>.md\`
-
-7. Populate with:
-   - Title / problem statement
-   - Initial description/background
-   - "Related Requests" list (can be empty placeholders)
-
-8. Return the document path and stable_id.
-`
-  },
-  {
-    filename: 'oc-iterate.md',
-    content: `---
-description: Update an existing OpenContext document with insights from the current session
----
-
-# Enrich existing doc with new context
-
-Goal: Update an existing OpenContext document with insights from the current session.
-
-## Steps
-
-1. Identify the target idea document from the current discussion (ask only if ambiguous). Set \`CONTEXTS_ROOT=$HOME/.opencontext/contexts\` and load \`\${CONTEXTS_ROOT}/<target_doc>\` to understand existing sections.
-2. Derive the owning space from the doc path (e.g., \`<space>/.../foo.md\` → space \`<space>\`). If unclear, run \`oc folder ls --all\`. Then run \`oc context manifest <space> --llm --limit 10\` and load each \`abs_path\` for inspiration.
-3. Update the Markdown directly in the global file:
-   - Ensure a \`## Iteration Log\` section exists (create if missing).
-   - Append a new entry timestamped with local date/time in readable format (e.g., \`2026-01-16 17:00\`) that summarizes insights, cites referenced docs, and lists next steps/risks.
-   - **Citation rule**: when citing any OpenContext doc, use the stable link format \`oc://doc/<stable_id>\` as the primary reference. Only add \`abs_path\` when you need line-level evidence.
-   - Refresh any other impacted sections (Overview, Requirements, Implementation notes, etc.).
-4. Save the updated document and call \`oc doc set-desc <target_doc> "<latest summary>"\` so the manifest reflects the newest iteration.
-5. Report the updated doc path plus which references were used.
-`
-  },
-];
-
 const CURSOR_WORKFLOWS = [
   {
     filename: 'opencontext-help.md',
@@ -499,20 +345,6 @@ function ensureProjectArtifacts(projectRoot) {
     }
   });
 
-  // Generate Claude Code commands in .claude/commands/
-  const claudeDir = path.join(projectRoot, '.claude');
-  fse.ensureDirSync(claudeDir);
-
-  const claudeCommandsDir = path.join(claudeDir, 'commands');
-  fse.ensureDirSync(claudeCommandsDir);
-
-  CLAUDE_WORKFLOWS.forEach((workflow) => {
-    const filePath = path.join(claudeCommandsDir, workflow.filename);
-    if (writeFileIfChanged(filePath, workflow.content)) {
-      outputs.push(filePath);
-    }
-  });
-
   // Generate MCP configuration for Cursor
   const mcpConfigPath = path.join(cursorDir, 'mcp.json');
   const ocMcpConfig = {
@@ -536,35 +368,11 @@ function ensureProjectArtifacts(projectRoot) {
   
   // Only update if opencontext config is missing or different
   const existingOc = mcpConfig.mcpServers.opencontext;
-  if (!existingOc || existingOc.command !== ocMcpConfig.command ||
+  if (!existingOc || existingOc.command !== ocMcpConfig.command || 
       JSON.stringify(existingOc.args) !== JSON.stringify(ocMcpConfig.args)) {
     mcpConfig.mcpServers.opencontext = ocMcpConfig;
     fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2) + '\n', 'utf8');
     outputs.push(mcpConfigPath);
-  }
-
-  // Generate MCP configuration for Claude Code (root .mcp.json)
-  const claudeMcpConfigPath = path.join(projectRoot, '.mcp.json');
-  let claudeMcpConfig = { mcpServers: {} };
-  if (fs.existsSync(claudeMcpConfigPath)) {
-    try {
-      const existing = JSON.parse(fs.readFileSync(claudeMcpConfigPath, 'utf8'));
-      claudeMcpConfig = existing;
-      if (!claudeMcpConfig.mcpServers) {
-        claudeMcpConfig.mcpServers = {};
-      }
-    } catch {
-      // If parse fails, start fresh
-      claudeMcpConfig = { mcpServers: {} };
-    }
-  }
-
-  const existingClaudeOc = claudeMcpConfig.mcpServers.opencontext;
-  if (!existingClaudeOc || existingClaudeOc.command !== ocMcpConfig.command ||
-      JSON.stringify(existingClaudeOc.args) !== JSON.stringify(ocMcpConfig.args)) {
-    claudeMcpConfig.mcpServers.opencontext = ocMcpConfig;
-    fs.writeFileSync(claudeMcpConfigPath, JSON.stringify(claudeMcpConfig, null, 2) + '\n', 'utf8');
-    outputs.push(claudeMcpConfigPath);
   }
 
   return outputs;
