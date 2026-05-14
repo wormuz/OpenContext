@@ -125,7 +125,7 @@ server.registerTool(
     })
   },
   async ({ folder_path, limit }) => {
-    const result = store.generateManifest({ folderPath: folder_path, limit: limit ?? 10 });
+    const result = store.generateManifest({ folderPath: folder_path, limit });
     const unindexed = result.unindexed_files || [];
     const payload = {
       items: result.items,
