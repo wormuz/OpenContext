@@ -29,9 +29,9 @@ function toToolResponse(data) {
 server.registerTool(
   'oc_list_folders',
   {
-    description: '列出 OpenContext 中的目录列表（scope=all 表示包含子目录）',
+    description: 'List folders in OpenContext (top-level by default, full tree with scope=all). For most workflows prefer oc_manifest (if you know the folder name) or oc_search (content search) — they are the primary discovery tools. This raw folder listing is mainly for bootstrapping when nothing is known yet.',
     inputSchema: z.object({
-      scope: z.enum(['root', 'all']).optional().describe('默认 root，仅返回顶层目录；all 返回所有目录')
+      scope: z.enum(['root', 'all']).optional().describe('Default "root" returns only top-level folders. "all" returns the full nested tree.')
     })
   },
   async ({ scope }) => {
@@ -43,10 +43,10 @@ server.registerTool(
 server.registerTool(
   'oc_list_docs',
   {
-    description: '列出指定目录下的文档',
+    description: 'List documents directly inside a folder (or recursively with recursive=true). For most cases prefer oc_manifest — it returns the same data plus warns about unindexed files. Use oc_list_docs only when you specifically need the lightweight listing without the unindexed_files check.',
     inputSchema: z.object({
-      folder_path: z.string().min(1).describe('相对 contexts/ 的目录路径，例如 "project-a/design"'),
-      recursive: z.boolean().optional().describe('是否递归列出子目录文档，默认 false')
+      folder_path: z.string().min(1).describe('Folder path relative to contexts/, e.g. "project-a/design"'),
+      recursive: z.boolean().optional().describe('Include subfolders recursively. Default false (only direct children).')
     })
   },
   async ({ folder_path, recursive }) => {
@@ -61,9 +61,9 @@ server.registerTool(
     description:
       'REQUIRED for any file under ~/.opencontext/contexts/. Using Write or Edit there bypasses the SQLite index — the file becomes invisible to oc_manifest and oc_search. Always use this tool to create docs, oc_save_doc to write/replace body, and oc_set_doc_desc to update description. Creates an empty document (with optional description) in the given folder.',
     inputSchema: z.object({
-      folder_path: z.string().min(1).describe('Target folder, relative to contexts/'),
-      doc_name: z.string().min(1).describe('File name, e.g. "plan.md"'),
-      description: z.string().optional().describe('Document description')
+      folder_path: z.string().min(1).describe('PARENT folder, relative to contexts/. The doc will be created as folder_path/doc_name. Contrast with oc_folder_create whose folder_path is the FULL new path (parent+leaf in one string).'),
+      doc_name: z.string().min(1).describe('Leaf file name including extension, e.g. "plan.md"'),
+      description: z.string().optional().describe('Document description (1-2 sentences: what is inside, why it exists, when to use it)')
     })
   },
   async ({ folder_path, doc_name, description }) => {
@@ -262,9 +262,9 @@ server.registerTool(
 server.registerTool(
   'oc_folder_create',
   {
-    description: 'Create a new folder in OpenContext. Safe to call if folder already exists.',
+    description: 'Create a new folder in OpenContext. IMPORTANT: pass the FULL path of the new folder (parent + new leaf name combined as one string) — UNLIKE oc_create_doc which splits parent (folder_path) and leaf (doc_name) into two parameters. Safe to call if folder already exists.',
     inputSchema: z.object({
-      folder_path: z.string().min(1).describe('Folder path relative to contexts/, e.g. "Product/opencontext/ideas"'),
+      folder_path: z.string().min(1).describe('FULL path of the new folder relative to contexts/, including the new folder name as the last segment. Example: "Product/opencontext/ideas" creates folder "ideas" inside "Product/opencontext/". No separate name parameter (unlike oc_create_doc).'),
       description: z.string().optional().describe('Optional folder description')
     })
   },
