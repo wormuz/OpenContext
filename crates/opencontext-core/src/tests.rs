@@ -781,14 +781,15 @@ mod manifest_tests {
         std::fs::write(nested.join("a.md"), "a").unwrap();
         std::fs::write(ctx.env_info().contexts_root.join("project/INDEX.md"), "idx").unwrap();
 
-        let added = ctx.reconcile_folder("project").unwrap();
+        let report = ctx.reconcile_folder("project").unwrap();
         assert_eq!(
-            added,
+            report.added,
             vec![
                 "project/INDEX.md".to_string(),
                 "project/research/a.md".to_string(),
             ]
         );
+        assert!(report.removed.is_empty());
 
         // After reconcile, manifest no longer reports drift.
         let result = ctx.generate_manifest_full("project", None).unwrap();
@@ -796,11 +797,32 @@ mod manifest_tests {
         assert!(result.unindexed_files.is_empty());
 
         // Idempotent — second run finds nothing.
-        let added2 = ctx.reconcile_folder("project").unwrap();
-        assert!(added2.is_empty());
+        let report2 = ctx.reconcile_folder("project").unwrap();
+        assert!(report2.added.is_empty());
+        assert!(report2.removed.is_empty());
 
         // Newly registered docs have stable_ids and resolvable metadata.
         let meta = ctx.get_doc_meta("project/INDEX.md").unwrap();
         assert!(!meta.stable_id.is_empty());
+    }
+
+    #[test]
+    fn test_reconcile_folder_prunes_stale_entries() {
+        let (ctx, _temp) = create_test_context();
+        ctx.create_folder("project", None).unwrap();
+        ctx.create_doc("project", "keep.md", None).unwrap();
+        ctx.create_doc("project", "stale.md", None).unwrap();
+
+        // Simulate plain `rm` on one file outside of remove_doc().
+        std::fs::remove_file(ctx.env_info().contexts_root.join("project/stale.md")).unwrap();
+
+        let report = ctx.reconcile_folder("project").unwrap();
+        assert!(report.added.is_empty());
+        assert_eq!(report.removed, vec!["project/stale.md".to_string()]);
+
+        // SQLite no longer reports the stale entry.
+        let result = ctx.generate_manifest_full("project", None).unwrap();
+        let rel_paths: Vec<&str> = result.items.iter().map(|d| d.rel_path.as_str()).collect();
+        assert_eq!(rel_paths, vec!["project/keep.md"]);
     }
 }

@@ -110,6 +110,21 @@ server.registerTool(
 );
 
 server.registerTool(
+  'oc_delete_doc',
+  {
+    description:
+      'Delete a document under ~/.opencontext/contexts/. Removes both the .md file on disk AND its SQLite index entry (atomic). REQUIRED instead of plain `rm` — bare `rm` leaves a stale SQLite row that oc_manifest will keep reporting. Use this when retiring a doc; if you only want to relocate it, use oc_create_doc + oc_save_doc at the new path, then oc_delete_doc at the old path.',
+    inputSchema: z.object({
+      doc_path: z.string().min(1).describe('Document path relative to contexts/, e.g. "project-a/plan.md"')
+    })
+  },
+  async ({ doc_path }) => {
+    const result = store.removeDoc({ docPath: doc_path });
+    return toToolResponse(result);
+  }
+);
+
+server.registerTool(
   'oc_manifest',
   {
     description:
@@ -153,19 +168,30 @@ server.registerTool(
   'oc_reconcile_folder',
   {
     description:
-      'Register *.md files that exist on disk under ~/.opencontext/contexts/<folder_path> but are missing from the SQLite index. Fast — does NOT recompute embeddings (run `oc index build` for that). Use after oc_manifest reports `unindexed_files`, or after pulling docs from git.',
+      'Two-way reconcile of `*.md` files under ~/.opencontext/contexts/<folder_path> with the SQLite index. (a) INSERTs docs rows for files present on disk but missing from the index — e.g. created via Write/Edit, or pulled from git. (b) DELETEs docs rows whose file no longer exists on disk — e.g. removed via plain `rm`. Fast — does NOT recompute embeddings (run `oc index build` for that). Returns { added, removed, count }. Use after oc_manifest reports `unindexed_files`, after pulling docs from git, or after rm-ing files outside of oc_delete_doc.',
     inputSchema: z.object({
       folder_path: z.string().min(1).describe('Folder path relative to contexts/')
     })
   },
   async ({ folder_path }) => {
-    const added = store.reconcileFolder({ folderPath: folder_path });
+    const report = store.reconcileFolder({ folderPath: folder_path });
+    const added = report.added || [];
+    const removed = report.removed || [];
+    const total = added.length + removed.length;
+    let hint;
+    if (total === 0) {
+      hint = 'No drift detected.';
+    } else {
+      const parts = [];
+      if (added.length > 0) parts.push('Run `oc index build` to compute embeddings for the new docs.');
+      if (removed.length > 0) parts.push(`${removed.length} stale index entry/entries pruned (file(s) gone from disk).`);
+      hint = parts.join(' ');
+    }
     const payload = {
       added,
-      count: added.length,
-      hint: added.length > 0
-        ? 'Run `oc index build` to compute embeddings for the new docs.'
-        : 'No drift detected.',
+      removed,
+      count: total,
+      hint,
     };
     return toToolResponse(payload);
   }

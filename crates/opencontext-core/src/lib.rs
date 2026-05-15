@@ -1037,16 +1037,17 @@ impl OpenContext {
     /// files that are not yet present in the `docs` table. Does NOT touch
     /// embeddings / LanceDB — that's a separate (slow) step via
     /// `oc index build`. Returns the list of newly registered rel_paths.
-    pub fn reconcile_folder(&self, folder_path: &str) -> CoreResult<Vec<String>> {
+    pub fn reconcile_folder(&self, folder_path: &str) -> CoreResult<ReconcileReport> {
         let rel_path = normalize_folder_path(Some(folder_path))?;
         let folder = self
             .find_folder(&rel_path)?
             .ok_or_else(|| folder_not_found(&rel_path))?;
 
-        let mut on_disk: Vec<String> = Vec::new();
+        let mut on_disk_vec: Vec<String> = Vec::new();
         if folder.abs_path.is_dir() {
-            scan_md_files(&folder.abs_path, &self.contexts_root, &mut on_disk)?;
+            scan_md_files(&folder.abs_path, &self.contexts_root, &mut on_disk_vec)?;
         }
+        let on_disk: std::collections::HashSet<String> = on_disk_vec.iter().cloned().collect();
 
         let known: std::collections::HashSet<String> = self.with_conn(|conn| {
             let pattern = if folder.rel_path.is_empty() {
@@ -1062,7 +1063,7 @@ impl OpenContext {
         })?;
 
         let mut added: Vec<String> = Vec::new();
-        for doc_rel in on_disk {
+        for doc_rel in on_disk_vec {
             if known.contains(&doc_rel) {
                 continue;
             }
@@ -1107,8 +1108,33 @@ impl OpenContext {
             added.push(doc_rel);
         }
 
+        // Remove stale index entries: docs in SQLite whose file no longer exists on disk.
+        let mut removed: Vec<String> = Vec::new();
+        for known_rel in &known {
+            if on_disk.contains(known_rel) {
+                continue;
+            }
+            // Confirm file is truly missing on disk (defense against scan_md_files quirks).
+            let abs = self.contexts_root.join(known_rel);
+            if abs.exists() {
+                continue;
+            }
+            self.with_conn(|conn| {
+                conn.execute("DELETE FROM docs WHERE rel_path = ?1", params![known_rel])?;
+                Ok(())
+            })?;
+
+            #[cfg(feature = "search")]
+            self.emit_doc_event(DocEvent::Deleted {
+                rel_path: known_rel.clone(),
+            });
+
+            removed.push(known_rel.clone());
+        }
+
         added.sort();
-        Ok(added)
+        removed.sort();
+        Ok(ReconcileReport { added, removed })
     }
 
     fn find_folder(&self, rel_path: &str) -> CoreResult<Option<Folder>> {
@@ -1198,6 +1224,12 @@ pub struct RenameResult {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Removed {
     pub rel_path: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReconcileReport {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

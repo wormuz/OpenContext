@@ -227,9 +227,10 @@ function generateManifest(options) {
 
 /**
  * Reconcile a folder: scan filesystem under `folderPath` and INSERT a
- * `docs` row for every `*.md` that has none. Does NOT rebuild embeddings.
+ * `docs` row for every `*.md` that has none. Also DELETE docs rows whose
+ * file is no longer on disk. Does NOT rebuild embeddings.
  * @param {{ folderPath: string }} options
- * @returns {string[]} rel_paths of newly registered docs
+ * @returns {{ added: string[], removed: string[] }}
  */
 function reconcileFolder(options) {
   return handleResult(native.get().reconcileFolder({

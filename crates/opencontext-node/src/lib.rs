@@ -253,8 +253,8 @@ pub struct ReconcileOptions {
 #[napi]
 pub fn reconcile_folder(env: Env, options: ReconcileOptions) -> NapiResult<JsUnknown> {
     let ctx = ctx()?;
-    let added = convert(ctx.reconcile_folder(&options.folder_path))?;
-    to_js(env, &added)
+    let report = convert(ctx.reconcile_folder(&options.folder_path))?;
+    to_js(env, &report)
 }
 
 fn to_js<T: Serialize>(env: Env, value: &T) -> NapiResult<JsUnknown> {
