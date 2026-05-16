@@ -92,8 +92,11 @@ server.registerTool(
   'oc_save_doc',
   {
     description:
-      'Write/replace the body of a document under ~/.opencontext/contexts/. REQUIRED instead of Write/Edit on the .md file — going through this tool keeps the SQLite index, updated_at timestamp, and search-index sync events consistent. The doc must already exist (use oc_create_doc first). Optionally updates the description in the same call.\n\n' +
-      '⚠️ SIZE LIMIT: the `content` parameter passes through the calling LLM\'s output-token budget (≈8192 tokens for tool-call params). Files larger than ~25 KB / ~300 lines will hit the ceiling and fail with a synthetic stop_sequence — independent of model (Haiku/Sonnet/Opus all fail the same way). For large files: edit the `.md` directly on disk via Write/Edit/sed, THEN call `oc_reconcile_doc({ doc_path })` to resync the SQLite index + embeddings without paying the token cost.',
+      'Write/replace the body of a document under ~/.opencontext/contexts/. Keeps SQLite index, updated_at, and search embeddings in sync. The doc must already exist (use oc_create_doc first). Optionally updates the description in the same call.\n\n' +
+      'DECISION TREE — choose by file size:\n' +
+      '• ≤300 lines / ≤25 KB → use THIS tool (oc_save_doc): pass full content, index updates atomically.\n' +
+      '• >300 lines / >25 KB → use Edit/Write on the abs_path, THEN call oc_reconcile_doc(doc_path): Edit is unbounded, reconcile resyncs SQLite + embeddings.\n\n' +
+      'WHY the split: the `content` param passes through the LLM output-token budget (≈8192 tokens total for all tool-call params). Files over ~25 KB hit this ceiling and fail with a silent stop_sequence truncation — the write appears to succeed but content is cut off. oc_reconcile_doc has no content param so it is safe for any file size.',
     inputSchema: z.object({
       doc_path: z.string().min(1).describe('Document path relative to contexts/, e.g. "project-a/plan.md"'),
       content: z.string().describe('Full new file content (replaces existing body). Hard cap ≈25 KB — for larger files use oc_reconcile_doc after disk edit.'),
