@@ -77,6 +77,10 @@ export declare function getDocByStableId(stableId: string): NapiResult
 export declare function saveDocContent(options: SaveDocOptions): NapiResult
 export declare function reconcileDoc(options: ReconcileDocOptions): NapiResult
 export declare function generateManifest(options: ManifestOptions): NapiResult
+export interface SuggestFoldersOptions {
+  query: string
+}
+export declare function suggestFolders(options: SuggestFoldersOptions): NapiResult
 export interface ReconcileOptions {
   folderPath: string
 }

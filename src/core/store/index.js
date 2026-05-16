@@ -45,6 +45,7 @@ module.exports = {
   reconcileDoc: nativeStore.reconcileDoc,
   generateManifest: nativeStore.generateManifest,
   reconcileFolder: nativeStore.reconcileFolder,
+  suggestFolders: nativeStore.suggestFolders,
   
   // Constants
   DEFAULT_BASE_ROOT,

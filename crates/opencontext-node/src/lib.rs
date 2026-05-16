@@ -262,6 +262,18 @@ pub fn generate_manifest(env: Env, options: ManifestOptions) -> NapiResult<JsUnk
 }
 
 #[napi(object)]
+pub struct SuggestFoldersOptions {
+    pub query: String,
+}
+
+#[napi]
+pub fn suggest_folders(env: Env, options: SuggestFoldersOptions) -> NapiResult<JsUnknown> {
+    let ctx = ctx()?;
+    let suggestions = convert(ctx.suggest_folders(&options.query))?;
+    to_js(env, &suggestions)
+}
+
+#[napi(object)]
 pub struct ReconcileOptions {
     pub folder_path: String,
 }

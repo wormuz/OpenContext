@@ -165,7 +165,22 @@ server.registerTool(
     })
   },
   async ({ folder_path, limit }) => {
-    const result = store.generateManifest({ folderPath: folder_path, limit });
+    let result;
+    try {
+      result = store.generateManifest({ folderPath: folder_path, limit });
+    } catch (err) {
+      if (err && err.message && err.message.includes('does not exist')) {
+        const suggestions = store.suggestFolders({ query: folder_path });
+        if (suggestions && suggestions.length > 0) {
+          const list = suggestions.map(s => `"${s}"`).join(', ');
+          throw new Error(
+            `Folder "${folder_path}" not found. Did you mean: ${list}? ` +
+            `Call oc_manifest again with the correct folder_path.`
+          );
+        }
+      }
+      throw err;
+    }
     const unindexed = result.unindexed_files || [];
     const payload = {
       items: result.items,

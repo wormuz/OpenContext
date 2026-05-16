@@ -1199,6 +1199,50 @@ impl OpenContext {
         })
     }
 
+    pub fn suggest_folders(&self, query: &str) -> CoreResult<Vec<String>> {
+        self.with_conn(|conn| {
+            // Try _ ↔ - swap
+            let swapped = if query.contains('_') {
+                query.replace('_', "-")
+            } else {
+                query.replace('-', "_")
+            };
+
+            // Partial match on the last path segment
+            let leaf = query.split('/').last().unwrap_or(query);
+            let pattern = format!("%{}%", leaf);
+
+            let mut candidates: Vec<String> = Vec::new();
+
+            // exact swapped
+            if swapped != query {
+                let mut s = conn.prepare(
+                    "SELECT rel_path FROM folders WHERE rel_path = ?1",
+                )?;
+                if let Ok(r) = s.query_row([&swapped], |row| row.get::<_, String>(0)) {
+                    if !candidates.contains(&r) {
+                        candidates.push(r);
+                    }
+                }
+            }
+
+            // partial
+            let mut s2 = conn.prepare(
+                "SELECT rel_path FROM folders WHERE rel_path LIKE ?1 ORDER BY length(rel_path) LIMIT 5",
+            )?;
+            let rows = s2.query_map([&pattern], |row| row.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .filter(|r| r != query);
+            for r in rows {
+                if !candidates.contains(&r) {
+                    candidates.push(r);
+                }
+            }
+
+            Ok(candidates)
+        })
+    }
+
     fn find_doc(&self, rel_path: &str) -> CoreResult<Option<Doc>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(

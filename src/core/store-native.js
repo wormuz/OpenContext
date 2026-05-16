@@ -261,6 +261,17 @@ function reconcileFolder(options) {
   }));
 }
 
+/**
+ * Suggest folders similar to the given query (normalized _ ↔ - + partial match).
+ * @param {{ query: string }} options
+ * @returns {string[]}
+ */
+function suggestFolders(options) {
+  return handleResult(native.get().suggestFolders({
+    query: options.query,
+  }));
+}
+
 module.exports = {
   // Availability checks
   isNativeAvailable,
@@ -286,4 +297,5 @@ module.exports = {
   reconcileDoc,
   generateManifest,
   reconcileFolder,
+  suggestFolders,
 };
