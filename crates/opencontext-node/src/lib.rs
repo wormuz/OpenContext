@@ -112,6 +112,12 @@ pub struct SaveDocOptions {
 }
 
 #[napi(object)]
+pub struct ReconcileDocOptions {
+    pub doc_path: String,
+    pub description: Option<String>,
+}
+
+#[napi(object)]
 pub struct ManifestOptions {
     pub folder_path: String,
     pub limit: Option<u32>,
@@ -231,6 +237,16 @@ pub fn save_doc_content(env: Env, options: SaveDocOptions) -> NapiResult<JsUnkno
     let result = convert(ctx.save_doc_content(
         &options.doc_path,
         &options.content,
+        options.description.as_deref(),
+    ))?;
+    to_js(env, &result)
+}
+
+#[napi]
+pub fn reconcile_doc(env: Env, options: ReconcileDocOptions) -> NapiResult<JsUnknown> {
+    let ctx = ctx()?;
+    let result = convert(ctx.reconcile_doc(
+        &options.doc_path,
         options.description.as_deref(),
     ))?;
     to_js(env, &result)

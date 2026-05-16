@@ -310,7 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { initEnvironment, listFolders, createFolder, renameFolder, moveFolder, removeFolder, listDocs, createDoc, moveDoc, renameDoc, removeDoc, setDocDescription, getDocContent, getDocMeta, getDocByStableId, saveDocContent, generateManifest, reconcileFolder, Searcher, Indexer, loadSearchConfig, startIndexSync, isIndexSyncRunning, getIndexSyncStatus } = nativeBinding
+const { initEnvironment, listFolders, createFolder, renameFolder, moveFolder, removeFolder, listDocs, createDoc, moveDoc, renameDoc, removeDoc, setDocDescription, getDocContent, getDocMeta, getDocByStableId, saveDocContent, reconcileDoc, generateManifest, reconcileFolder, Searcher, Indexer, loadSearchConfig, startIndexSync, isIndexSyncRunning, getIndexSyncStatus } = nativeBinding
 
 module.exports.initEnvironment = initEnvironment
 module.exports.listFolders = listFolders
@@ -328,6 +328,7 @@ module.exports.getDocContent = getDocContent
 module.exports.getDocMeta = getDocMeta
 module.exports.getDocByStableId = getDocByStableId
 module.exports.saveDocContent = saveDocContent
+module.exports.reconcileDoc = reconcileDoc
 module.exports.generateManifest = generateManifest
 module.exports.reconcileFolder = reconcileFolder
 module.exports.Searcher = Searcher

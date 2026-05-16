@@ -92,10 +92,11 @@ server.registerTool(
   'oc_save_doc',
   {
     description:
-      'Write/replace the body of a document under ~/.opencontext/contexts/. REQUIRED instead of Write/Edit on the .md file — going through this tool keeps the SQLite index, updated_at timestamp, and search-index sync events consistent. The doc must already exist (use oc_create_doc first). Optionally updates the description in the same call.',
+      'Write/replace the body of a document under ~/.opencontext/contexts/. REQUIRED instead of Write/Edit on the .md file — going through this tool keeps the SQLite index, updated_at timestamp, and search-index sync events consistent. The doc must already exist (use oc_create_doc first). Optionally updates the description in the same call.\n\n' +
+      '⚠️ SIZE LIMIT: the `content` parameter passes through the calling LLM\'s output-token budget (≈8192 tokens for tool-call params). Files larger than ~25 KB / ~300 lines will hit the ceiling and fail with a synthetic stop_sequence — independent of model (Haiku/Sonnet/Opus all fail the same way). For large files: edit the `.md` directly on disk via Write/Edit/sed, THEN call `oc_reconcile_doc({ doc_path })` to resync the SQLite index + embeddings without paying the token cost.',
     inputSchema: z.object({
       doc_path: z.string().min(1).describe('Document path relative to contexts/, e.g. "project-a/plan.md"'),
-      content: z.string().describe('Full new file content (replaces existing body)'),
+      content: z.string().describe('Full new file content (replaces existing body). Hard cap ≈25 KB — for larger files use oc_reconcile_doc after disk edit.'),
       description: z.string().optional().describe('Optional new description; leave empty to keep current')
     })
   },
@@ -103,6 +104,27 @@ server.registerTool(
     const result = store.saveDocContent({
       docPath: doc_path,
       content,
+      description,
+    });
+    return toToolResponse(result);
+  }
+);
+
+server.registerTool(
+  'oc_reconcile_doc',
+  {
+    description:
+      'Resync a single document\'s SQLite index entry + search embeddings after the `.md` was edited directly on disk (via Write/Edit/sed/Bash heredoc). Path-only API: avoids passing full content through the caller\'s tool-call token budget, so it works for arbitrarily large files (unlike oc_save_doc which is bounded by ≈8192 output tokens ≈ 25 KB).\n\n' +
+      'Use when: (a) you edited the file directly with Write/Edit and need to refresh the index; (b) the expected content is larger than oc_save_doc can carry through the model\'s output stream; (c) you ran sed/awk/script transformations on the file and need to commit the result to SQLite. The doc must already exist (use oc_create_doc + oc_save_doc for fresh docs, or write the file then call reconcile).\n\n' +
+      'Workflow: 1) edit the file on disk → 2) call oc_reconcile_doc with the doc_path → 3) SQLite updated_at bumps + search index recomputes embeddings.',
+    inputSchema: z.object({
+      doc_path: z.string().min(1).describe('Document path relative to contexts/, e.g. "project-a/plan.md". File must already exist on disk and be registered in SQLite.'),
+      description: z.string().optional().describe('Optional new description; omit to keep current')
+    })
+  },
+  async ({ doc_path, description }) => {
+    const result = store.reconcileDoc({
+      docPath: doc_path,
       description,
     });
     return toToolResponse(result);

@@ -42,6 +42,7 @@ module.exports = {
   getDocByStableId: nativeStore.getDocByStableId,
   getDocContent: nativeStore.getDocContent,
   saveDocContent: nativeStore.saveDocContent,
+  reconcileDoc: nativeStore.reconcileDoc,
   generateManifest: nativeStore.generateManifest,
   reconcileFolder: nativeStore.reconcileFolder,
   

@@ -51,6 +51,10 @@ export interface SaveDocOptions {
   content: string
   description?: string
 }
+export interface ReconcileDocOptions {
+  docPath: string
+  description?: string
+}
 export interface ManifestOptions {
   folderPath: string
   limit?: number
@@ -71,6 +75,7 @@ export declare function getDocContent(docPath: string): NapiResult
 export declare function getDocMeta(docPath: string): NapiResult
 export declare function getDocByStableId(stableId: string): NapiResult
 export declare function saveDocContent(options: SaveDocOptions): NapiResult
+export declare function reconcileDoc(options: ReconcileDocOptions): NapiResult
 export declare function generateManifest(options: ManifestOptions): NapiResult
 export interface ReconcileOptions {
   folderPath: string

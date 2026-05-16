@@ -943,6 +943,58 @@ impl OpenContext {
         })
     }
 
+    /// Resync an existing doc whose `.md` was edited directly on disk
+    /// (via Write/Edit/sed) — bumps `updated_at`, optionally updates
+    /// description, and re-emits the doc-updated event so the search
+    /// index recomputes embeddings.
+    ///
+    /// Path-only API: avoids passing full content through the MCP
+    /// caller's token budget (saveDocContent requires the entire body
+    /// as a parameter, which breaks for files larger than the caller's
+    /// output-token ceiling). The content is read implicitly from
+    /// disk by downstream consumers of the Updated event.
+    pub fn reconcile_doc(
+        &self,
+        doc_path: &str,
+        description: Option<&str>,
+    ) -> CoreResult<DocSaved> {
+        let rel_doc_path = normalize_doc_path(Some(doc_path))?;
+        let doc = self
+            .find_doc(&rel_doc_path)?
+            .ok_or_else(|| doc_not_found(&rel_doc_path))?;
+        if !doc.abs_path.is_file() {
+            return Err(CoreError::Message(format!(
+                "file not on disk: {}",
+                doc.abs_path.display()
+            )));
+        }
+        let ts = now_iso();
+        self.with_conn(|conn| {
+            if let Some(desc) = description {
+                conn.execute(
+                    "UPDATE docs SET description = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![desc, ts, doc.id],
+                )?;
+            } else {
+                conn.execute(
+                    "UPDATE docs SET updated_at = ?1 WHERE id = ?2",
+                    params![ts, doc.id],
+                )?;
+            }
+            Ok(())
+        })?;
+
+        #[cfg(feature = "search")]
+        self.emit_doc_event(DocEvent::Updated {
+            rel_path: rel_doc_path.clone(),
+        });
+
+        Ok(DocSaved {
+            rel_path: rel_doc_path,
+            abs_path: doc.abs_path,
+        })
+    }
+
     pub fn generate_manifest(
         &self,
         folder_path: &str,

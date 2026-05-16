@@ -209,6 +209,29 @@ function saveDocContent(options) {
 }
 
 /**
+ * Reconcile an existing doc whose `.md` was edited directly on disk
+ * (Write/Edit/sed). Re-indexes SQLite + re-emits the doc-updated event
+ * so the search index recomputes embeddings — without requiring the
+ * caller to pass the full file content as a parameter.
+ *
+ * USE THIS instead of `saveDocContent` when the file body is too large
+ * to pass through the LLM's output-token ceiling (≈8192 tokens, i.e.
+ * roughly 25-30 KB / 300+ lines).
+ *
+ * Workflow: write/edit the .md on disk via Edit/Write/sed → call
+ * `reconcileDoc({ docPath })` → SQLite + embeddings updated.
+ *
+ * @param {{ docPath: string, description?: string }} options
+ * @returns {{ rel_path: string, abs_path: string }}
+ */
+function reconcileDoc(options) {
+  return handleResult(native.get().reconcileDoc({
+    docPath: options.docPath,
+    description: options.description,
+  }));
+}
+
+/**
  * Generate manifest with drift detection.
  *
  * Returns documents registered in SQLite for the folder, plus a list of
@@ -260,6 +283,7 @@ module.exports = {
   getDocByStableId,
   getDocContent,
   saveDocContent,
+  reconcileDoc,
   generateManifest,
   reconcileFolder,
 };
