@@ -467,6 +467,25 @@ impl Indexer {
         serde_json::to_value(&stats).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
+    /// Build index for docs in a specific folder only (incremental by default).
+    #[napi]
+    pub async fn build_folder(
+        &self,
+        folder: String,
+        force: Option<bool>,
+    ) -> Result<serde_json::Value> {
+        let oc_ctx = ctx()?;
+        let docs = oc_ctx.list_docs(&folder, true).map_err(to_napi_error)?;
+
+        let mut indexer = self.inner.lock().await;
+        let stats = indexer
+            .build_smart(docs, force.unwrap_or(false), |_| {})
+            .await
+            .map_err(search_error_to_napi)?;
+
+        serde_json::to_value(&stats).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
     /// Index a single file
     #[napi]
     pub async fn index_file(&self, rel_path: String) -> Result<u32> {

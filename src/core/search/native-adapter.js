@@ -99,28 +99,31 @@ class NativeIndexer {
   }
 
   /**
-   * Build index for all documents (incremental by default, full on force).
+   * Build index (incremental by default, full on --force).
    * @param {Object} options
    * @param {boolean} options.force - Force full rebuild
+   * @param {string} options.folder - Limit to specific folder
    * @param {Function} options.onProgress - Real-time progress callback
    * @returns {Promise<Object>} Index stats
    */
   async buildIndex(options = {}) {
     await this.initialize();
 
-    let stats;
-    if (options.onProgress) {
-      // Use progress-enabled method — real-time callbacks via ThreadsafeFunction
-      stats = await this._indexer.buildAllWithProgress(
-        options.force ?? false,
-        (progress) => {
+    const wrapProgress = options.onProgress
+      ? (progress) => {
           const noChanges =
             progress.phase === 'done' &&
             progress.message &&
             progress.message.includes('No changes');
           options.onProgress({ ...progress, noChanges });
         }
-      );
+      : null;
+
+    let stats;
+    if (options.folder) {
+      stats = await this._indexer.buildFolder(options.folder, options.force ?? false);
+    } else if (wrapProgress) {
+      stats = await this._indexer.buildAllWithProgress(options.force ?? false, wrapProgress);
     } else {
       stats = await this._indexer.buildAll(options.force ?? false);
     }
