@@ -953,11 +953,7 @@ impl OpenContext {
     /// as a parameter, which breaks for files larger than the caller's
     /// output-token ceiling). The content is read implicitly from
     /// disk by downstream consumers of the Updated event.
-    pub fn reconcile_doc(
-        &self,
-        doc_path: &str,
-        description: Option<&str>,
-    ) -> CoreResult<DocSaved> {
+    pub fn reconcile_doc(&self, doc_path: &str, description: Option<&str>) -> CoreResult<DocSaved> {
         let rel_doc_path = normalize_doc_path(Some(doc_path))?;
         let doc = self
             .find_doc(&rel_doc_path)?
