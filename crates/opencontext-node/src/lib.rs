@@ -245,10 +245,7 @@ pub fn save_doc_content(env: Env, options: SaveDocOptions) -> NapiResult<JsUnkno
 #[napi]
 pub fn reconcile_doc(env: Env, options: ReconcileDocOptions) -> NapiResult<JsUnknown> {
     let ctx = ctx()?;
-    let result = convert(ctx.reconcile_doc(
-        &options.doc_path,
-        options.description.as_deref(),
-    ))?;
+    let result = convert(ctx.reconcile_doc(&options.doc_path, options.description.as_deref()))?;
     to_js(env, &result)
 }
 
@@ -395,11 +392,60 @@ impl Indexer {
         })
     }
 
-    /// Build index for all documents
-    /// Automatically fetches all documents from OpenContext
+    /// Build index with real-time progress callback.
+    /// Returns a Promise. Callback receives IndexProgress as a JS object.
     #[napi]
-    pub async fn build_all(&self) -> Result<serde_json::Value> {
-        // Get all documents from OpenContext
+    pub fn build_all_with_progress(
+        &self,
+        env: Env,
+        force: Option<bool>,
+        callback: napi::JsFunction,
+    ) -> Result<napi::JsObject> {
+        use napi::threadsafe_function::{
+            ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
+        };
+
+        // ErrorStrategy::Fatal: callback called as callback(value) not callback(null, value)
+        let tsfn: ThreadsafeFunction<serde_json::Value, ErrorStrategy::Fatal> = callback
+            .create_threadsafe_function(0, |ctx: ThreadSafeCallContext<serde_json::Value>| {
+                let js_val = ctx.env.to_js_value(&ctx.value)?;
+                Ok(vec![js_val])
+            })?;
+
+        let inner = self.inner.clone();
+
+        env.execute_tokio_future(
+            async move {
+                let oc_ctx = ctx()?;
+                let folders = oc_ctx.list_folders(true).map_err(to_napi_error)?;
+                let mut all_docs = Vec::new();
+                for folder in folders {
+                    let docs = oc_ctx
+                        .list_docs(&folder.rel_path, true)
+                        .map_err(to_napi_error)?;
+                    all_docs.extend(docs);
+                }
+
+                let mut indexer = inner.lock().await;
+                let stats = indexer
+                    .build_smart(all_docs, force.unwrap_or(false), move |progress| {
+                        if let Ok(value) = serde_json::to_value(&progress) {
+                            tsfn.call(value, ThreadsafeFunctionCallMode::NonBlocking);
+                        }
+                    })
+                    .await
+                    .map_err(search_error_to_napi)?;
+
+                serde_json::to_value(&stats).map_err(|e| napi::Error::from_reason(e.to_string()))
+            },
+            |env, value| env.to_js_value(&value),
+        )
+    }
+
+    /// Build index for all documents.
+    /// By default incremental (skip unchanged docs). Pass force=true for full rebuild.
+    #[napi]
+    pub async fn build_all(&self, force: Option<bool>) -> Result<serde_json::Value> {
         let oc_ctx = ctx()?;
         let folders = oc_ctx.list_folders(true).map_err(to_napi_error)?;
 
@@ -413,7 +459,26 @@ impl Indexer {
 
         let mut indexer = self.inner.lock().await;
         let stats = indexer
-            .build_all(all_docs)
+            .build_smart(all_docs, force.unwrap_or(false), |_| {})
+            .await
+            .map_err(search_error_to_napi)?;
+
+        serde_json::to_value(&stats).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Build index for docs in a specific folder only (incremental by default).
+    #[napi]
+    pub async fn build_folder(
+        &self,
+        folder: String,
+        force: Option<bool>,
+    ) -> Result<serde_json::Value> {
+        let oc_ctx = ctx()?;
+        let docs = oc_ctx.list_docs(&folder, true).map_err(to_napi_error)?;
+
+        let mut indexer = self.inner.lock().await;
+        let stats = indexer
+            .build_smart(docs, force.unwrap_or(false), |_| {})
             .await
             .map_err(search_error_to_napi)?;
 

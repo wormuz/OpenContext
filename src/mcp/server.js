@@ -384,6 +384,16 @@ async function startServer(options = {}) {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('OpenContext MCP server running (stdio)');
+
+  // Start background index sync service (batches doc events every 5 min)
+  // Runs only if index has been built at least once; silently skips if not.
+  if (!options.autoExit && process.env.OPENCONTEXT_MCP_TEST !== '1') {
+    const native = require('../core/native');
+    if (native.isAvailable()) {
+      native.get().startIndexSync(null).catch(() => {});
+    }
+  }
+
   if (options.autoExit || process.env.OPENCONTEXT_MCP_TEST === '1') {
     setTimeout(() => process.exit(0), 0);
   }

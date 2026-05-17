@@ -130,10 +130,17 @@ export declare class Indexer {
    */
   static create(): Promise<Indexer>
   /**
-   * Build index for all documents
-   * Automatically fetches all documents from OpenContext
+   * Build index with real-time progress callback.
+   * Returns a Promise. Callback receives IndexProgress as a JS object.
    */
-  buildAll(): Promise<any>
+  buildAllWithProgress(force: boolean | undefined | null, callback: (...args: any[]) => any): object
+  /**
+   * Build index for all documents.
+   * By default incremental (skip unchanged docs). Pass force=true for full rebuild.
+   */
+  buildAll(force?: boolean | undefined | null): Promise<any>
+  /** Build index for docs in a specific folder only (incremental by default). */
+  buildFolder(folder: string, force?: boolean | undefined | null): Promise<any>
   /** Index a single file */
   indexFile(relPath: string): Promise<number>
   /** Remove a file from the index */

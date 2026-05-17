@@ -18,6 +18,8 @@ search = [
     "dep:log",
     "dep:regex",
     "dep:urlencoding",
+    "dep:sha2",
+    "dep:hex",
 ]
 
 [dependencies]
@@ -42,6 +44,8 @@ uuid = { version = "1", features = ["v4"], optional = true }
 log = { version = "0.4", optional = true }
 regex = { version = "1", optional = true }
 urlencoding = { version = "2.1", optional = true }
+sha2 = { version = "0.10", optional = true }
+hex = { version = "0.4", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
