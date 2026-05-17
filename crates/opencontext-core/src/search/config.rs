@@ -90,7 +90,7 @@ fn default_dimensions() -> usize {
 }
 
 fn default_batch_size() -> usize {
-    10 // DashScope and some other APIs limit batch size to 10
+    50 // Ollama supports large batches; DashScope users should set batch_size: 10 in config
 }
 
 /// Search behavior configuration
@@ -186,6 +186,8 @@ struct NodeJsConfig {
     embedding_api_base: Option<String>,
     #[serde(rename = "EMBEDDING_MODEL")]
     embedding_model: Option<String>,
+    #[serde(rename = "EMBEDDING_BATCH_SIZE")]
+    embedding_batch_size: Option<usize>,
 
     // Legacy naming (backward compatibility)
     #[serde(rename = "OPENAI_API_KEY")]
@@ -234,6 +236,11 @@ impl SearchConfig {
                     if let Some(model) = node_config.embedding_model {
                         if !model.is_empty() {
                             config.embedding.model = model;
+                        }
+                    }
+                    if let Some(batch_size) = node_config.embedding_batch_size {
+                        if batch_size > 0 {
+                            config.embedding.batch_size = batch_size;
                         }
                     }
                 }

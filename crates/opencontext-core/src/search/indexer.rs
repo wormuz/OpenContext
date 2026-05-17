@@ -225,7 +225,7 @@ impl Indexer {
         self.vector_store.reset().await?;
 
         // Process documents in batches
-        let batch_size = 10;
+        let batch_size = self.config.embedding.batch_size;
         let total_batches = docs.len().div_ceil(batch_size);
 
         for (batch_idx, batch) in docs.chunks(batch_size).enumerate() {
@@ -569,7 +569,7 @@ impl Indexer {
         let total_to_index = to_index.len();
         let mut total_chunks = 0usize;
 
-        let batch_size = 10;
+        let batch_size = self.config.embedding.batch_size;
         let total_batches = total_to_index.div_ceil(batch_size);
 
         on_progress(IndexProgress {

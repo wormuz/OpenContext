@@ -126,11 +126,9 @@ impl EmbeddingClient {
     ) -> SearchResult<Vec<Vec<f32>>> {
         let input_count = texts.len();
 
-        // Truncate texts that are too long (most embedding APIs have ~8K token limit)
-        // Using char count as approximation: ~4 chars per token for English, ~1-2 for CJK/Cyrillic
-        // nomic-embed-text and similar models have 8192 token limit
-        // Conservative limit: 2000 chars (safe for all languages including Cyrillic/CJK)
-        const MAX_CHARS: usize = 2000;
+        // nomic-embed-text: 2048 token limit. Cyrillic/CJK ~1 char per token.
+        // 700 chars is safe for all languages and leaves headroom.
+        const MAX_CHARS: usize = 700;
         let texts: Vec<String> = texts
             .into_iter()
             .map(|t| {
