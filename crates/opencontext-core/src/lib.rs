@@ -1205,7 +1205,7 @@ impl OpenContext {
             };
 
             // Partial match on the last path segment
-            let leaf = query.split('/').last().unwrap_or(query);
+            let leaf = query.split('/').next_back().unwrap_or(query);
             let pattern = format!("%{}%", leaf);
 
             let mut candidates: Vec<String> = Vec::new();

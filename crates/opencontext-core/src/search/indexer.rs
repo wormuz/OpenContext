@@ -342,7 +342,7 @@ impl Indexer {
             }
 
             // Attach embeddings to chunks
-            for (chunk, embedding) in all_chunks.iter_mut().zip(embeddings.into_iter()) {
+            for (chunk, embedding) in all_chunks.iter_mut().zip(embeddings) {
                 chunk.vector = embedding;
             }
 
@@ -668,7 +668,7 @@ impl Indexer {
                 self.verify_dimensions().await?;
             }
 
-            for (chunk, embedding) in all_chunks.iter_mut().zip(embeddings.into_iter()) {
+            for (chunk, embedding) in all_chunks.iter_mut().zip(embeddings) {
                 chunk.vector = embedding;
             }
 
@@ -796,7 +796,7 @@ impl Indexer {
             self.verify_dimensions().await?;
         }
 
-        for (chunk, embedding) in chunks.iter_mut().zip(embeddings.into_iter()) {
+        for (chunk, embedding) in chunks.iter_mut().zip(embeddings) {
             chunk.vector = embedding;
         }
 
