@@ -245,10 +245,7 @@ pub fn save_doc_content(env: Env, options: SaveDocOptions) -> NapiResult<JsUnkno
 #[napi]
 pub fn reconcile_doc(env: Env, options: ReconcileDocOptions) -> NapiResult<JsUnknown> {
     let ctx = ctx()?;
-    let result = convert(ctx.reconcile_doc(
-        &options.doc_path,
-        options.description.as_deref(),
-    ))?;
+    let result = convert(ctx.reconcile_doc(&options.doc_path, options.description.as_deref()))?;
     to_js(env, &result)
 }
 
@@ -395,11 +392,10 @@ impl Indexer {
         })
     }
 
-    /// Build index for all documents
-    /// Automatically fetches all documents from OpenContext
+    /// Build index for all documents.
+    /// By default incremental (skip unchanged docs). Pass force=true for full rebuild.
     #[napi]
-    pub async fn build_all(&self) -> Result<serde_json::Value> {
-        // Get all documents from OpenContext
+    pub async fn build_all(&self, force: Option<bool>) -> Result<serde_json::Value> {
         let oc_ctx = ctx()?;
         let folders = oc_ctx.list_folders(true).map_err(to_napi_error)?;
 
@@ -413,7 +409,7 @@ impl Indexer {
 
         let mut indexer = self.inner.lock().await;
         let stats = indexer
-            .build_all(all_docs)
+            .build_smart(all_docs, force.unwrap_or(false), |_| {})
             .await
             .map_err(search_error_to_napi)?;
 

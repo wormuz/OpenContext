@@ -1,6 +1,9 @@
 //! Document indexer
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+
+use sha2::{Digest, Sha256};
 
 use super::chunker::Chunker;
 use super::config::SearchConfig;
@@ -95,6 +98,16 @@ fn extract_idea_box(rel_path: &str) -> Option<String> {
     }
 }
 
+/// Per-file change counts for incremental builds
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexChanges {
+    pub added: usize,
+    pub modified: usize,
+    pub deleted: usize,
+    pub unchanged: usize,
+}
+
 /// Index build statistics
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -109,6 +122,11 @@ pub struct IndexStats {
     pub elapsed_ms: u64,
     /// Last updated timestamp (ms since epoch)
     pub last_updated: Option<u64>,
+    /// Build mode: "full" | "incremental"
+    pub mode: String,
+    /// Per-file change counts (populated for incremental builds)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changes: Option<IndexChanges>,
 }
 
 /// Index build progress
@@ -366,6 +384,319 @@ impl Indexer {
                     .unwrap_or_default()
                     .as_millis() as u64,
             ),
+            mode: "full".to_string(),
+            changes: None,
+        })
+    }
+
+    /// Compute sha256 hex digest of a string
+    fn sha256(content: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(content.as_bytes());
+        hex::encode(hasher.finalize())
+    }
+
+    /// Load doc checksums from metadata file
+    fn load_checksums(&self) -> HashMap<String, String> {
+        let path = self.config.paths.get_index_metadata_path();
+        if !path.exists() {
+            return HashMap::new();
+        }
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|v| v.get("checksums").cloned())
+            .and_then(|v| serde_json::from_value::<HashMap<String, String>>(v).ok())
+            .unwrap_or_default()
+    }
+
+    /// Save doc checksums to metadata file (merges with existing metadata)
+    fn save_checksums(&self, checksums: &HashMap<String, String>) -> SearchResult<()> {
+        let path = self.config.paths.get_index_metadata_path();
+
+        let mut meta: serde_json::Value = if path.exists() {
+            std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        meta["lastUpdated"] = serde_json::json!(now);
+        meta["checksums"] =
+            serde_json::to_value(checksums).unwrap_or_else(|_| serde_json::json!({}));
+
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&meta).unwrap_or_default(),
+        )
+        .map_err(|e| SearchError::Index(format!("Failed to write metadata: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Build index incrementally — only re-embed changed/new docs, delete removed ones.
+    /// Falls back to full rebuild if index doesn't exist.
+    pub async fn build_smart<F>(
+        &mut self,
+        docs: Vec<crate::Doc>,
+        force: bool,
+        mut on_progress: F,
+    ) -> SearchResult<IndexStats>
+    where
+        F: FnMut(IndexProgress),
+    {
+        if force || !self.vector_store.exists().await {
+            return self.build_all_with_progress(docs, on_progress).await;
+        }
+
+        let start = std::time::Instant::now();
+        let old_checksums = self.load_checksums();
+
+        on_progress(IndexProgress {
+            phase: "start".to_string(),
+            current: 0,
+            total: docs.len(),
+            percent: 0,
+            message: Some("Incremental update".to_string()),
+        });
+
+        // Compute new checksums and bucket docs
+        let mut new_checksums: HashMap<String, String> = HashMap::new();
+        let mut to_index: Vec<(crate::Doc, String)> = vec![];
+        let mut changes = IndexChanges::default();
+
+        on_progress(IndexProgress {
+            phase: "scan".to_string(),
+            current: docs.len(),
+            total: docs.len(),
+            percent: 5,
+            message: Some(format!("Scanned {} documents", docs.len())),
+        });
+
+        for doc in &docs {
+            if !std::path::Path::new(&doc.abs_path).exists() {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&doc.abs_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            if content.trim().is_empty() {
+                continue;
+            }
+            let checksum = Self::sha256(&content);
+            new_checksums.insert(doc.rel_path.clone(), checksum.clone());
+
+            match old_checksums.get(&doc.rel_path) {
+                None => {
+                    changes.added += 1;
+                    to_index.push((doc.clone(), content));
+                }
+                Some(old) if old != &checksum => {
+                    changes.modified += 1;
+                    to_index.push((doc.clone(), content));
+                }
+                _ => {
+                    changes.unchanged += 1;
+                }
+            }
+        }
+
+        // Detect deleted docs
+        let current_paths: std::collections::HashSet<_> = new_checksums.keys().cloned().collect();
+        for old_path in old_checksums.keys() {
+            if !current_paths.contains(old_path.as_str()) {
+                self.vector_store.delete_by_file(old_path).await?;
+                changes.deleted += 1;
+            }
+        }
+
+        on_progress(IndexProgress {
+            phase: "detect".to_string(),
+            current: 0,
+            total: 0,
+            percent: 10,
+            message: Some(format!(
+                "Changes: +{} added, ~{} modified, -{} deleted, ={} unchanged",
+                changes.added, changes.modified, changes.deleted, changes.unchanged
+            )),
+        });
+
+        if to_index.is_empty() {
+            self.save_checksums(&new_checksums)?;
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            on_progress(IndexProgress {
+                phase: "done".to_string(),
+                current: 0,
+                total: 0,
+                percent: 100,
+                message: Some("No changes, index is up to date".to_string()),
+            });
+            return Ok(IndexStats {
+                total_docs: docs.len(),
+                total_chunks: 0,
+                total_tokens: None,
+                elapsed_ms,
+                last_updated: Some(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64,
+                ),
+                mode: "incremental".to_string(),
+                changes: Some(changes),
+            });
+        }
+
+        let total_to_index = to_index.len();
+        let mut total_chunks = 0usize;
+
+        let batch_size = 10;
+        let total_batches = total_to_index.div_ceil(batch_size);
+
+        on_progress(IndexProgress {
+            phase: "chunk".to_string(),
+            current: 0,
+            total: total_to_index,
+            percent: 15,
+            message: Some(format!("Chunking {} changed documents", total_to_index)),
+        });
+
+        for (batch_idx, batch) in to_index.chunks(batch_size).enumerate() {
+            let mut all_chunks = Vec::new();
+
+            for (doc, content) in batch {
+                // Remove old chunks for this doc before re-indexing
+                self.vector_store.delete_by_file(&doc.rel_path).await?;
+
+                if doc.rel_path.starts_with(".ideas/") {
+                    let entries = parse_idea_entries(content);
+                    let idea_box = extract_idea_box(&doc.rel_path);
+                    for (i, entry) in entries.into_iter().enumerate() {
+                        let entry_date = entry.created_at.get(0..10).unwrap_or("").to_string();
+                        let title_line = entry
+                            .content
+                            .split('\n')
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        let id = format!("{}#{}", doc.rel_path, entry.id);
+                        all_chunks.push(Chunk {
+                            id,
+                            file_path: doc.rel_path.clone(),
+                            content: entry.content,
+                            heading_path: String::new(),
+                            section_title: if title_line.is_empty() {
+                                None
+                            } else {
+                                Some(title_line)
+                            },
+                            doc_type: Some("idea".to_string()),
+                            entry_id: Some(entry.id),
+                            entry_date: if entry_date.is_empty() {
+                                None
+                            } else {
+                                Some(entry_date)
+                            },
+                            entry_created_at: Some(entry.created_at),
+                            idea_box: idea_box.clone(),
+                            chunk_index: i,
+                            vector: vec![],
+                        });
+                    }
+                } else {
+                    let text_chunks = self.chunker.chunk(content, &doc.rel_path);
+                    for (i, text_chunk) in text_chunks.into_iter().enumerate() {
+                        let id = format!("{}#{}", doc.rel_path, i);
+                        all_chunks.push(Chunk {
+                            id,
+                            file_path: doc.rel_path.clone(),
+                            content: text_chunk.content,
+                            heading_path: text_chunk.heading_path,
+                            section_title: None,
+                            doc_type: Some("doc".to_string()),
+                            entry_id: None,
+                            entry_date: None,
+                            entry_created_at: None,
+                            idea_box: None,
+                            chunk_index: i,
+                            vector: vec![],
+                        });
+                    }
+                }
+            }
+
+            if all_chunks.is_empty() {
+                continue;
+            }
+
+            on_progress(IndexProgress {
+                phase: "embedding".to_string(),
+                current: batch_idx + 1,
+                total: total_batches,
+                percent: (15 + (batch_idx * 80) / total_batches.max(1)) as u8,
+                message: Some(format!(
+                    "Generating embeddings batch {}/{}",
+                    batch_idx + 1,
+                    total_batches
+                )),
+            });
+
+            let texts: Vec<String> = all_chunks.iter().map(|c| c.content.clone()).collect();
+            let embeddings = self.embedding_client.embed(texts).await?;
+
+            if !self.dimensions_verified {
+                self.verify_dimensions().await?;
+            }
+
+            for (chunk, embedding) in all_chunks.iter_mut().zip(embeddings.into_iter()) {
+                chunk.vector = embedding;
+            }
+
+            let count = self.vector_store.upsert(all_chunks).await?;
+            total_chunks += count;
+        }
+
+        self.save_checksums(&new_checksums)?;
+
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        on_progress(IndexProgress {
+            phase: "done".to_string(),
+            current: total_to_index,
+            total: total_to_index,
+            percent: 100,
+            message: Some(format!(
+                "Done: {} changed docs, {} chunks",
+                total_to_index, total_chunks
+            )),
+        });
+
+        Ok(IndexStats {
+            total_docs: docs.len(),
+            total_chunks,
+            total_tokens: None,
+            elapsed_ms,
+            last_updated: Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64,
+            ),
+            mode: "incremental".to_string(),
+            changes: Some(changes),
         })
     }
 
@@ -507,11 +838,13 @@ impl Indexer {
         };
 
         Ok(IndexStats {
-            total_docs: 0, // We don't track this separately
+            total_docs: 0,
             total_chunks: count,
             total_tokens: None,
             elapsed_ms: 0,
             last_updated,
+            mode: "full".to_string(),
+            changes: None,
         })
     }
 

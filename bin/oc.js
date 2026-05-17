@@ -652,23 +652,22 @@ indexCmd
         force: options.force,
         onProgress: (progress) => {
           if (progress.phase === 'start') {
-            const modeLabel = progress.mode === 'full' ? 'Full rebuild' : 'Incremental update';
-            console.log(`🔄 ${modeLabel}...`);
+            const msg = progress.message || (options.force ? 'Full rebuild' : 'Incremental update');
+            console.log(`🔄 ${msg}...`);
           } else if (progress.phase === 'scan') {
-            console.log(`📄 Scanned ${progress.fileCount} documents`);
+            console.log(`📄 ${progress.message || `Scanned ${progress.current} documents`}`);
           } else if (progress.phase === 'detect') {
-            console.log(`🔍 Changes: +${progress.added} added, ~${progress.modified} modified, -${progress.deleted} deleted, =${progress.unchanged} unchanged`);
+            console.log(`🔍 ${progress.message || ''}`);
           } else if (progress.phase === 'chunk') {
-            console.log(`✂️  Split into ${progress.chunkCount} chunks`);
+            console.log(`✂️  ${progress.message || ''}`);
           } else if (progress.phase === 'embedding') {
-            console.log(`🧠 Generating ${progress.total} embeddings...`);
+            console.log(`🧠 ${progress.message || `Generating embeddings batch ${progress.current}/${progress.total}`}`);
           } else if (progress.phase === 'embedding_progress') {
             process.stdout.write(`\r   Processing batch ${progress.current}/${progress.total}...`);
           } else if (progress.phase === 'done') {
             if (progress.noChanges) {
               console.log('✅ No changes, index is up to date!');
             } else {
-              process.stdout.write('\n');
               console.log('✅ Index build complete!');
             }
           }
