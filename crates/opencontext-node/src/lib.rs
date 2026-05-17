@@ -392,6 +392,57 @@ impl Indexer {
         })
     }
 
+    /// Build index with real-time progress callback.
+    /// Returns a Promise. Callback receives IndexProgress as a JS object.
+    #[napi]
+    pub fn build_all_with_progress(
+        &self,
+        env: Env,
+        force: Option<bool>,
+        callback: napi::JsFunction,
+    ) -> Result<napi::JsObject> {
+        use napi::threadsafe_function::{
+            ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
+        };
+
+        let tsfn: ThreadsafeFunction<serde_json::Value> = callback.create_threadsafe_function(
+            0,
+            |ctx: ThreadSafeCallContext<serde_json::Value>| {
+                let js_val = ctx.env.to_js_value(&ctx.value)?;
+                Ok(vec![js_val])
+            },
+        )?;
+
+        let inner = self.inner.clone();
+
+        env.execute_tokio_future(
+            async move {
+                let oc_ctx = ctx()?;
+                let folders = oc_ctx.list_folders(true).map_err(to_napi_error)?;
+                let mut all_docs = Vec::new();
+                for folder in folders {
+                    let docs = oc_ctx
+                        .list_docs(&folder.rel_path, true)
+                        .map_err(to_napi_error)?;
+                    all_docs.extend(docs);
+                }
+
+                let mut indexer = inner.lock().await;
+                let stats = indexer
+                    .build_smart(all_docs, force.unwrap_or(false), move |progress| {
+                        if let Ok(value) = serde_json::to_value(&progress) {
+                            tsfn.call(Ok(value), ThreadsafeFunctionCallMode::NonBlocking);
+                        }
+                    })
+                    .await
+                    .map_err(search_error_to_napi)?;
+
+                serde_json::to_value(&stats).map_err(|e| napi::Error::from_reason(e.to_string()))
+            },
+            |env, value| env.to_js_value(&value),
+        )
+    }
+
     /// Build index for all documents.
     /// By default incremental (skip unchanged docs). Pass force=true for full rebuild.
     #[napi]

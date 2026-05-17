@@ -102,22 +102,27 @@ class NativeIndexer {
    * Build index for all documents (incremental by default, full on force).
    * @param {Object} options
    * @param {boolean} options.force - Force full rebuild
-   * @param {Function} options.onProgress - Progress callback (called once at done for now)
+   * @param {Function} options.onProgress - Real-time progress callback
    * @returns {Promise<Object>} Index stats
    */
   async buildIndex(options = {}) {
     await this.initialize();
 
-    const stats = await this._indexer.buildAll(options.force ?? false);
-
+    let stats;
     if (options.onProgress) {
-      const noChanges =
-        stats.mode === 'incremental' &&
-        stats.changes &&
-        stats.changes.added === 0 &&
-        stats.changes.modified === 0 &&
-        stats.changes.deleted === 0;
-      options.onProgress({ phase: 'done', percent: 100, noChanges });
+      // Use progress-enabled method — real-time callbacks via ThreadsafeFunction
+      stats = await this._indexer.buildAllWithProgress(
+        options.force ?? false,
+        (progress) => {
+          const noChanges =
+            progress.phase === 'done' &&
+            progress.message &&
+            progress.message.includes('No changes');
+          options.onProgress({ ...progress, noChanges });
+        }
+      );
+    } else {
+      stats = await this._indexer.buildAll(options.force ?? false);
     }
 
     return {
