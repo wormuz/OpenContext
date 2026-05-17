@@ -402,16 +402,15 @@ impl Indexer {
         callback: napi::JsFunction,
     ) -> Result<napi::JsObject> {
         use napi::threadsafe_function::{
-            ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
+            ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
         };
 
-        let tsfn: ThreadsafeFunction<serde_json::Value> = callback.create_threadsafe_function(
-            0,
-            |ctx: ThreadSafeCallContext<serde_json::Value>| {
+        // ErrorStrategy::Fatal: callback called as callback(value) not callback(null, value)
+        let tsfn: ThreadsafeFunction<serde_json::Value, ErrorStrategy::Fatal> = callback
+            .create_threadsafe_function(0, |ctx: ThreadSafeCallContext<serde_json::Value>| {
                 let js_val = ctx.env.to_js_value(&ctx.value)?;
                 Ok(vec![js_val])
-            },
-        )?;
+            })?;
 
         let inner = self.inner.clone();
 
@@ -431,7 +430,7 @@ impl Indexer {
                 let stats = indexer
                     .build_smart(all_docs, force.unwrap_or(false), move |progress| {
                         if let Ok(value) = serde_json::to_value(&progress) {
-                            tsfn.call(Ok(value), ThreadsafeFunctionCallMode::NonBlocking);
+                            tsfn.call(value, ThreadsafeFunctionCallMode::NonBlocking);
                         }
                     })
                     .await

@@ -373,6 +373,9 @@ impl Indexer {
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
+        // Save empty checksums to mark that a build has run (enables incremental next time)
+        let _ = self.save_checksums(&HashMap::new());
+
         Ok(IndexStats {
             total_docs,
             total_chunks,
@@ -456,7 +459,11 @@ impl Indexer {
     where
         F: FnMut(IndexProgress),
     {
-        if force || !self.vector_store.exists().await {
+        // Use metadata file as "index was built" marker — vector_store.exists()
+        // returns false for empty indices (0 docs = no LanceDB table created).
+        let metadata_path = self.config.paths.get_index_metadata_path();
+        let index_was_built = metadata_path.exists();
+        if force || !index_was_built {
             return self.build_all_with_progress(docs, on_progress).await;
         }
 
