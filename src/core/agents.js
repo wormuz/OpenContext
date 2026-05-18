@@ -232,13 +232,14 @@ const COMMAND_DEFS = [
       '',
       '1. If the target space/folder is unclear, run `oc folder ls --all` and ask the user to choose a folder (no guessing when ambiguous).',
       '2. Run `oc context manifest <folder_path> --limit 10` (or `oc context manifest . --limit 10` for broad context).',
-      '3. Load 3–10 relevant files by `abs_path` and extract:',
+      '3. **MANDATORY**: Read `INDEX.md` (or `research/STATUS.md` if INDEX.md absent) using the Read tool immediately — do NOT stop after the manifest. This step is not optional.',
+      '4. Load 2–9 more relevant files by `abs_path` and extract:',
       '   - Key constraints, decisions, and current state',
       '   - Open questions / risks',
-      '4. Cite sources:',
+      '5. Cite sources:',
       '   - Prefer stable links `oc://doc/<stable_id>` when available in the manifest output.',
       '   - Use `abs_path` + `range` only for line-level evidence.',
-      '5. Summarize the loaded context and proceed with the user’s task.'
+      '6. Summarize the loaded context and proceed with the user\'s task.'
     ].join('\n')
   },
   {
@@ -264,7 +265,7 @@ const COMMAND_DEFS = [
     title: '/opencontext-create',
     description: 'Create a new idea or problem statement inside OpenContext',
     body: [
-      '0. **Blocking requirement**: Do NOT answer the user’s broader question until the document has been created and minimally populated.',
+      '0. **Blocking requirement**: Do NOT answer the user\'s broader question until the document has been created and minimally populated.',
       '1. Infer the target space from recent context; if unclear, ask the user to specify the space (no default).',
       '2. Derive a concise idea title & summary from the current conversation, then generate a slug (kebab-case; fallback to `idea-<YYYYMMDDHHmm>`). Only ask the user if information is insufficient.',
       '3. Determine the target folder path under OpenContext (do NOT assume fixed subfolders like `ideas/`):',
