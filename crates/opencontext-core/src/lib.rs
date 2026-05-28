@@ -707,7 +707,9 @@ impl OpenContext {
         if let Some(parent) = abs_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&abs_path, "")?;
+        if !abs_path.exists() {
+            fs::write(&abs_path, "")?;
+        }
         let ts = now_iso();
         let stable_id = self.with_conn(|conn| {
             let sid = generate_stable_id(conn)?;

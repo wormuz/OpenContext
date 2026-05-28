@@ -362,6 +362,25 @@ mod doc_tests {
     }
 
     #[test]
+    fn test_create_doc_preserves_existing_file_on_disk() {
+        let (ctx, _temp) = create_test_context();
+
+        // Write file on disk before registering in the index
+        let abs_path = _temp.path().join("test-folder").join("preexisting.md");
+        std::fs::create_dir_all(abs_path.parent().unwrap()).unwrap();
+        std::fs::write(&abs_path, "# Existing content").unwrap();
+
+        // createDoc should register it without wiping
+        let result = ctx
+            .create_doc("test-folder", "preexisting.md", Some("desc"))
+            .unwrap();
+        assert_eq!(result.rel_path, "test-folder/preexisting.md");
+
+        let content = std::fs::read_to_string(&abs_path).unwrap();
+        assert_eq!(content, "# Existing content");
+    }
+
+    #[test]
     fn test_create_doc_invalid_name() {
         let (ctx, _temp) = create_test_context();
 
