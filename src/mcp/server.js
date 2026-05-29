@@ -379,7 +379,7 @@ server.registerTool(
 server.registerTool(
   'oc_index_status',
   {
-    description: 'Check search index status: availability, chunk counts, embedding model name and dimensions, last build time. Use before oc_search to confirm the index is ready.',
+    description: 'Check search index status: availability, chunk counts, embedding model name and dimensions, last build time. If index is missing or stale, oc_search falls back to keyword-only (no semantic/vector search). Call this when oc_search results seem poor, or to confirm hybrid search is active. To build/rebuild the index: run `oc index build` in the terminal.',
     inputSchema: z.object({})
   },
   async () => {
@@ -418,7 +418,7 @@ server.registerTool(
 server.registerTool(
   'oc_get_context',
   {
-    description: 'Fetch full document content by stable_id or doc_path. Use this as the second step after oc_search: oc_search returns snippets, oc_get_context retrieves the full text of selected documents without token bloat from passing content through oc_search.',
+    description: 'Fetch full document content by stable_id or doc_path. Standard two-step workflow: oc_search → pick relevant docs → oc_get_context to read full text. Avoids token bloat from passing full content through oc_search results. Prefer stable_id (from oc://doc/<id> links or search results) over doc_path — stable_id survives renames.',
     inputSchema: z.object({
       stable_id: z.string().uuid().optional().describe('Document stable_id (UUID) from oc_search result or oc://doc/<id> link'),
       doc_path: z.string().optional().describe('Document path relative to contexts/, e.g. "Product/opencontext/guide"')
