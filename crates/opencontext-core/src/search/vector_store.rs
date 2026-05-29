@@ -63,7 +63,34 @@ impl VectorStore {
                     .execute()
                     .await
                     .map_err(SearchError::Lance)?;
-                self.table = Some(table);
+
+                // Detect dimension mismatch — warn if existing index was built with different dims
+                if let Ok(schema) = table.schema().await {
+                    let existing_dim = schema.field_with_name("vector").ok().and_then(|f| {
+                        if let DataType::FixedSizeList(_, size) = f.data_type() {
+                            Some(*size as usize)
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(dim) = existing_dim {
+                        if dim != self.dimensions {
+                            log::warn!(
+                                "[VectorStore] Dimension mismatch: index has {}d vectors but config expects {}d. \
+                                Run `oc index build` to rebuild with the new model.",
+                                dim,
+                                self.dimensions
+                            );
+                            // Don't set self.table — treat as empty so rebuild works
+                        } else {
+                            self.table = Some(table);
+                        }
+                    } else {
+                        self.table = Some(table);
+                    }
+                } else {
+                    self.table = Some(table);
+                }
             }
         }
 

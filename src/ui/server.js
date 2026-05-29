@@ -373,6 +373,7 @@ async function createUiServer({ host = '127.0.0.1', port = 3222 }) {
       const model = typeof modelOverride === 'string' && modelOverride.trim().length > 0
         ? modelOverride.trim()
         : (config.get('AI_MODEL') || 'gpt-4o');
+      const maxTokens = parseInt(config.get('AI_MAX_TOKENS') || '4096', 10);
 
       // Set SSE headers
       res.setHeader('Content-Type', 'text/event-stream');
@@ -440,7 +441,7 @@ async function createUiServer({ host = '127.0.0.1', port = 3222 }) {
             model,
             messages,
             stream: true,
-            max_tokens: 500
+            max_tokens: maxTokens
           })
         });
 

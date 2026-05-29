@@ -36,7 +36,7 @@
 <!-- OPENCONTEXT:START -->
 # OpenContext Instructions (Project)
 
-This repository relies on the global OpenContext knowledge base. See /Users/zhuxiaoran/.opencontext/agents/AGENTS.md for the full reference.
+This repository relies on the global OpenContext knowledge base. See /home/bonho/.opencontext/agents/AGENTS.md for the full reference.
 
 Quick workflow:
 - If you do not know the valid folder paths yet, run `oc folder ls --all` first.
@@ -58,4 +58,3 @@ OpenContext Stable Links (Document ID References):
 
 Keep this block so `oc init` can refresh the instructions.
 <!-- OPENCONTEXT:END -->
-

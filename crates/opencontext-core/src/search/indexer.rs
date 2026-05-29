@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
 
+use super::bm25_store::Bm25Store;
 use super::chunker::Chunker;
 use super::config::SearchConfig;
 use super::embedding::EmbeddingClient;
@@ -150,6 +151,7 @@ pub struct Indexer {
     config: SearchConfig,
     contexts_root: PathBuf,
     vector_store: VectorStore,
+    bm25_store: Bm25Store,
     embedding_client: EmbeddingClient,
     chunker: Chunker,
     /// Whether vector_store has been re-initialized with actual dimensions
@@ -160,10 +162,13 @@ impl Indexer {
     /// Create a new indexer
     pub async fn new(config: SearchConfig, contexts_root: PathBuf) -> SearchResult<Self> {
         let lancedb_path = config.paths.get_lancedb_path();
+        let bm25_path = config.paths.get_bm25_path();
         let dimensions = config.embedding.dimensions;
 
         let mut vector_store = VectorStore::new(lancedb_path, dimensions);
         vector_store.initialize().await?;
+
+        let bm25_store = Bm25Store::open(bm25_path)?;
 
         let embedding_client = EmbeddingClient::new(config.embedding.clone())?;
 
@@ -173,6 +178,7 @@ impl Indexer {
             config,
             contexts_root,
             vector_store,
+            bm25_store,
             embedding_client,
             chunker,
             dimensions_verified: false,
@@ -220,6 +226,7 @@ impl Indexer {
         let total_docs = docs.len();
         let mut total_chunks = 0;
         let mut processed_docs = 0;
+        let mut all_bm25_chunks: Vec<Chunk> = Vec::new();
 
         // Reset existing index
         self.vector_store.reset().await?;
@@ -355,9 +362,19 @@ impl Indexer {
                 message: Some("正在写入索引...".to_string()),
             });
 
+            // Collect chunks for BM25 (no vectors needed)
+            all_bm25_chunks.extend(all_chunks.iter().map(|c| {
+                let mut c = c.clone();
+                c.vector = vec![];
+                c
+            }));
+
             let count = self.vector_store.upsert(all_chunks).await?;
             total_chunks += count;
         }
+
+        // Build BM25 index from all collected chunks
+        self.bm25_store.index_all(&all_bm25_chunks)?;
 
         // Final progress
         on_progress(IndexProgress {
@@ -522,9 +539,11 @@ impl Indexer {
 
         // Detect deleted docs
         let current_paths: std::collections::HashSet<_> = new_checksums.keys().cloned().collect();
+        let mut bm25_deleted: Vec<String> = Vec::new();
         for old_path in old_checksums.keys() {
             if !current_paths.contains(old_path.as_str()) {
                 self.vector_store.delete_by_file(old_path).await?;
+                bm25_deleted.push(old_path.clone());
                 changes.deleted += 1;
             }
         }
@@ -568,6 +587,7 @@ impl Indexer {
 
         let total_to_index = to_index.len();
         let mut total_chunks = 0usize;
+        let mut bm25_added: Vec<Chunk> = Vec::new();
 
         let batch_size = self.config.embedding.batch_size;
         let total_batches = total_to_index.div_ceil(batch_size);
@@ -672,9 +692,21 @@ impl Indexer {
                 chunk.vector = embedding;
             }
 
+            // Track changed file paths for BM25 incremental update
+            let changed_paths: Vec<String> =
+                batch.iter().map(|(d, _)| d.rel_path.clone()).collect();
+            bm25_deleted.extend(changed_paths);
+            bm25_added.extend(all_chunks.iter().map(|c| {
+                let mut c = c.clone();
+                c.vector = vec![];
+                c
+            }));
+
             let count = self.vector_store.upsert(all_chunks).await?;
             total_chunks += count;
         }
+
+        self.bm25_store.update(&bm25_deleted, &bm25_added)?;
 
         self.save_checksums(&new_checksums)?;
 
@@ -801,13 +833,24 @@ impl Indexer {
         }
 
         // Store
+        let bm25_chunks: Vec<Chunk> = chunks
+            .iter()
+            .map(|c| {
+                let mut c = c.clone();
+                c.vector = vec![];
+                c
+            })
+            .collect();
         let count = self.vector_store.upsert(chunks).await?;
+        self.bm25_store
+            .update(&[rel_path.to_string()], &bm25_chunks)?;
         Ok(count)
     }
 
     /// Remove a file from the index
     pub async fn remove_file(&mut self, rel_path: &str) -> SearchResult<()> {
         self.vector_store.delete_by_file(rel_path).await?;
+        self.bm25_store.update(&[rel_path.to_string()], &[])?;
         Ok(())
     }
 
@@ -855,13 +898,50 @@ impl Indexer {
         })
     }
 
+    /// Extended index info for status reporting (model, bm25 count, etc.)
+    pub async fn get_index_info(&self) -> SearchResult<serde_json::Value> {
+        let vector_count = self.vector_store.count().await?;
+        let bm25_count = self.bm25_store.count().unwrap_or(0);
+
+        let metadata_path = self.config.paths.get_index_metadata_path();
+        let metadata: serde_json::Value = if metadata_path.exists() {
+            std::fs::read_to_string(&metadata_path)
+                .ok()
+                .and_then(|c| serde_json::from_str(&c).ok())
+                .unwrap_or_else(|| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+
+        let last_updated = metadata.get("lastUpdated").and_then(|v| v.as_u64());
+        let total_docs = metadata
+            .get("totalDocs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let embedding_model = metadata
+            .get("embeddingModel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let embedding_dim = self.config.embedding.dimensions;
+
+        Ok(serde_json::json!({
+            "available": vector_count > 0,
+            "vector_chunks": vector_count,
+            "bm25_docs": bm25_count,
+            "total_docs": total_docs,
+            "last_updated": last_updated,
+            "embedding_model": embedding_model,
+            "embedding_dimensions": embedding_dim,
+        }))
+    }
+
     /// Clean the index
     pub async fn clean(&mut self) -> SearchResult<()> {
         self.vector_store.reset().await
     }
 
     /// Update index metadata with current timestamp
-    pub fn update_metadata(&self) -> SearchResult<()> {
+    pub async fn update_metadata(&self) -> SearchResult<()> {
         let metadata_path = self.config.paths.get_index_metadata_path();
 
         // Read existing metadata or create new
@@ -881,6 +961,10 @@ impl Indexer {
             .as_millis() as u64;
 
         metadata["lastUpdated"] = serde_json::json!(now);
+        metadata["embeddingModel"] = serde_json::json!(&self.config.embedding.model);
+        if let Ok(count) = self.vector_store.count().await {
+            metadata["totalDocs"] = serde_json::json!(count);
+        }
 
         // Ensure directory exists
         if let Some(parent) = metadata_path.parent() {

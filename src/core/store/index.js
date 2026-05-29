@@ -8,7 +8,7 @@ const path = require('path');
 const os = require('os');
 
 const native = require('../native');
-const nativeStore = require('../store-native.js');
+const dataService = require('../data-service');
 
 // Require native bindings at load time
 native.require();
@@ -21,38 +21,38 @@ const DB_PATH = process.env.OPENCONTEXT_DB_PATH || path.join(BASE_ROOT, 'opencon
 
 // Log if debug enabled
 if (process.env.OC_STORE_DEBUG) {
-  console.log('[oc store] Using native (Rust) implementation');
+  console.log('[oc store] Using native (Rust) implementation via DataService');
 }
 
 module.exports = {
-  // Core functions
-  initEnvironment: nativeStore.initEnvironment,
-  listFolders: nativeStore.listFolders,
-  createFolder: nativeStore.createFolder,
-  renameFolder: nativeStore.renameFolder,
-  moveFolder: nativeStore.moveFolder,
-  removeFolder: nativeStore.removeFolder,
-  listDocs: nativeStore.listDocs,
-  createDoc: nativeStore.createDoc,
-  moveDoc: nativeStore.moveDoc,
-  renameDoc: nativeStore.renameDoc,
-  removeDoc: nativeStore.removeDoc,
-  setDocDescription: nativeStore.setDocDescription,
-  getDocMeta: nativeStore.getDocMeta,
-  getDocByStableId: nativeStore.getDocByStableId,
-  getDocContent: nativeStore.getDocContent,
-  saveDocContent: nativeStore.saveDocContent,
-  reconcileDoc: nativeStore.reconcileDoc,
-  generateManifest: nativeStore.generateManifest,
-  reconcileFolder: nativeStore.reconcileFolder,
-  suggestFolders: nativeStore.suggestFolders,
-  
+  // Core functions — all routed through DataService (adds cache + invalidation)
+  initEnvironment: (o) => dataService.initEnvironment(o),
+  listFolders: (o) => dataService.listFolders(o),
+  createFolder: (o) => dataService.createFolder(o),
+  renameFolder: (o) => dataService.renameFolder(o),
+  moveFolder: (o) => dataService.moveFolder(o),
+  removeFolder: (o) => dataService.removeFolder(o),
+  listDocs: (o) => dataService.listDocs(o),
+  createDoc: (o) => dataService.createDoc(o),
+  moveDoc: (o) => dataService.moveDoc(o),
+  renameDoc: (o) => dataService.renameDoc(o),
+  removeDoc: (o) => dataService.removeDoc(o),
+  setDocDescription: (o) => dataService.setDocDescription(o),
+  getDocMeta: (o) => dataService.getDocMeta(o),
+  getDocByStableId: (id) => dataService.getDocByStableId(id),
+  getDocContent: (p) => dataService.getDocContent(p),
+  saveDocContent: (o) => dataService.saveDocContent(o),
+  reconcileDoc: (o) => dataService.reconcileDoc(o),
+  generateManifest: (o) => dataService.generateManifest(o),
+  reconcileFolder: (o) => dataService.reconcileFolder(o),
+  suggestFolders: (o) => dataService.suggestFolders(o),
+
   // Constants
   DEFAULT_BASE_ROOT,
   BASE_ROOT,
   CONTEXTS_ROOT,
   DB_PATH,
-  
+
   // Implementation info
   isNativeAvailable: native.isAvailable,
   USE_NATIVE: true,

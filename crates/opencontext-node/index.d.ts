@@ -92,6 +92,11 @@ export interface SearchOptions {
   mode?: string
   aggregateBy?: string
   docType?: string
+  folderFilter?: string
+  minScore?: number
+  dateFrom?: string
+  dateTo?: string
+  includeNeighbors?: number
 }
 /** Load search config */
 export declare function loadSearchConfig(): any
@@ -107,6 +112,8 @@ export declare function loadSearchConfig(): any
 export declare function startIndexSync(intervalSecs?: number | undefined | null): Promise<boolean>
 /** Check if index sync service is running */
 export declare function isIndexSyncRunning(): boolean
+/** Flush pending index updates immediately (wake up interval loop) */
+export declare function flushIndexSync(): boolean
 /**
  * Get pending updates count from index sync service
  * Note: This is approximate as the service runs in background
@@ -149,6 +156,8 @@ export declare class Indexer {
   indexExists(): Promise<boolean>
   /** Get index statistics */
   getStats(): Promise<any>
+  /** Get extended index info (model, bm25 count, dimensions, etc.) */
+  getIndexInfo(): Promise<any>
   /** Clean/reset the index */
   clean(): Promise<void>
 }

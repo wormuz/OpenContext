@@ -159,6 +159,17 @@ impl PathsConfig {
             .unwrap_or_else(|| PathBuf::from(".opencontext/lancedb"))
     }
 
+    /// Get tantivy BM25 index path
+    pub fn get_bm25_path(&self) -> PathBuf {
+        if let Ok(root) = std::env::var("OPENCONTEXT_ROOT") {
+            return PathBuf::from(root).join("bm25-index");
+        }
+
+        dirs::home_dir()
+            .map(|h| h.join(".opencontext").join("bm25-index"))
+            .unwrap_or_else(|| PathBuf::from(".opencontext/bm25-index"))
+    }
+
     /// Get index metadata path
     pub fn get_index_metadata_path(&self) -> PathBuf {
         if let Some(ref path) = self.index_metadata_path {

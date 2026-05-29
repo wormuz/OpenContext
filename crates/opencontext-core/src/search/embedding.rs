@@ -63,7 +63,7 @@ impl EmbeddingClient {
         config.get_api_key()?;
 
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
+            .timeout(std::time::Duration::from_secs(300))
             .build()
             .map_err(SearchError::Http)?;
 

@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use super::bm25_store::Bm25Store;
 use super::config::SearchConfig;
 use super::embedding::EmbeddingClient;
 use super::error::SearchResult;
@@ -24,29 +25,27 @@ pub struct Searcher {
     config: SearchConfig,
     vector_store: VectorStore,
     embedding_client: EmbeddingClient,
-    /// All chunks for keyword search (loaded on init)
-    all_chunks: Vec<SearchHit>,
+    bm25_store: Bm25Store,
 }
 
 impl Searcher {
     /// Create a new searcher
     pub async fn new(config: SearchConfig) -> SearchResult<Self> {
         let lancedb_path = config.paths.get_lancedb_path();
+        let bm25_path = config.paths.get_bm25_path();
         let dimensions = config.embedding.dimensions;
 
         let mut vector_store = VectorStore::new(lancedb_path, dimensions);
         vector_store.initialize().await?;
 
         let embedding_client = EmbeddingClient::new(config.embedding.clone())?;
-
-        // Load all chunks for keyword search
-        let all_chunks = vector_store.get_all_chunks().await.unwrap_or_default();
+        let bm25_store = Bm25Store::open(bm25_path)?;
 
         Ok(Self {
             config,
             vector_store,
             embedding_client,
-            all_chunks,
+            bm25_store,
         })
     }
 
@@ -87,6 +86,33 @@ impl Searcher {
                 "doc" => hit.doc_type.as_deref().unwrap_or("doc") == "doc",
                 _ => true,
             });
+        }
+
+        if let Some(ref prefix) = options.folder_filter {
+            let prefix = prefix.trim_end_matches('/');
+            hits.retain(|hit| {
+                hit.file_path.starts_with(prefix)
+                    && (hit.file_path.len() == prefix.len()
+                        || hit.file_path.as_bytes().get(prefix.len()) == Some(&b'/'))
+            });
+        }
+
+        if let Some(from) = options.date_from.as_deref() {
+            hits.retain(|hit| hit.entry_date.as_deref().map_or(true, |d| d >= from));
+        }
+
+        if let Some(to) = options.date_to.as_deref() {
+            hits.retain(|hit| hit.entry_date.as_deref().map_or(true, |d| d <= to));
+        }
+
+        if let Some(min_score) = options.min_score {
+            hits.retain(|hit| hit.score >= min_score);
+        }
+
+        // Expand top results with neighboring chunks
+        let neighbor_window = options.include_neighbors.unwrap_or(0);
+        if neighbor_window > 0 && aggregate_by == AggregateBy::Content {
+            hits = self.expand_with_neighbors(hits, neighbor_window, limit);
         }
 
         // Aggregate results
@@ -135,200 +161,9 @@ impl Searcher {
         Ok(results)
     }
 
-    /// Perform keyword search using BM25 algorithm
-    /// Matches Node.js KeywordSearcher implementation
+    /// Keyword search via tantivy BM25 index
     fn keyword_search(&self, query: &str, limit: usize) -> Vec<SearchHit> {
-        // BM25 parameters (same as Node.js)
-        const K1: f32 = 1.2; // Term frequency saturation parameter
-        const B: f32 = 0.75; // Document length normalization parameter
-
-        let query_tokens = Self::tokenize(query);
-
-        if query_tokens.is_empty() || self.all_chunks.is_empty() {
-            return vec![];
-        }
-
-        // Pre-compute document statistics
-        let total_docs = self.all_chunks.len();
-
-        // Tokenize all documents and compute stats
-        let doc_data: Vec<(Vec<String>, HashMap<String, usize>, usize)> = self
-            .all_chunks
-            .iter()
-            .map(|chunk| {
-                let combined = format!(
-                    "{} {}",
-                    chunk.content,
-                    chunk.heading_path.as_deref().unwrap_or("")
-                );
-                let tokens = Self::tokenize(&combined);
-                let token_freq = Self::count_tokens(&tokens);
-                let length = tokens.len();
-                (tokens, token_freq, length)
-            })
-            .collect();
-
-        // Calculate average document length
-        let total_length: usize = doc_data.iter().map(|(_, _, len)| len).sum();
-        let avg_doc_length = if total_docs > 0 {
-            total_length as f32 / total_docs as f32
-        } else {
-            1.0
-        };
-
-        // Calculate document frequency for query terms
-        let mut doc_frequency: HashMap<String, usize> = HashMap::new();
-        for token in &query_tokens {
-            let df = doc_data
-                .iter()
-                .filter(|(_, freq, _)| freq.contains_key(token))
-                .count();
-            doc_frequency.insert(token.clone(), df);
-        }
-
-        // Score each document using BM25
-        let mut scored_hits: Vec<(f32, SearchHit)> = self
-            .all_chunks
-            .iter()
-            .zip(doc_data.iter())
-            .filter_map(|(chunk, (_, token_freq, doc_length))| {
-                let mut score = 0.0f32;
-
-                for term in &query_tokens {
-                    let tf = *token_freq.get(term).unwrap_or(&0) as f32;
-                    if tf == 0.0 {
-                        continue;
-                    }
-
-                    let df = *doc_frequency.get(term).unwrap_or(&0) as f32;
-                    if df == 0.0 {
-                        continue;
-                    }
-
-                    // IDF calculation: log((N - df + 0.5) / (df + 0.5) + 1)
-                    let idf = ((total_docs as f32 - df + 0.5) / (df + 0.5) + 1.0).ln();
-
-                    // TF normalization with document length
-                    let tf_norm = (tf * (K1 + 1.0))
-                        / (tf + K1 * (1.0 - B + B * (*doc_length as f32 / avg_doc_length)));
-
-                    score += idf * tf_norm;
-                }
-
-                if score > 0.0 {
-                    let mut hit = chunk.clone();
-                    hit.score = score;
-                    hit.matched_by = MatchType::Keyword;
-                    Some((score, hit))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Sort by score descending
-        scored_hits.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Normalize scores to 0-1 range (same as Node.js)
-        let max_score = scored_hits.first().map(|(s, _)| *s).unwrap_or(1.0);
-
-        scored_hits
-            .into_iter()
-            .take(limit)
-            .map(|(score, mut hit)| {
-                hit.score = if max_score > 0.0 {
-                    score / max_score
-                } else {
-                    0.0
-                };
-                hit
-            })
-            .collect()
-    }
-
-    /// Tokenize text (matches Node.js implementation)
-    /// Supports Chinese (character-level + 2-gram) and English
-    fn tokenize(text: &str) -> Vec<String> {
-        if text.is_empty() {
-            return vec![];
-        }
-
-        let normalized = text.to_lowercase();
-        let mut tokens = Vec::new();
-
-        // Regex-like matching for Chinese, English words, and numbers
-        let mut current_english = String::new();
-        let mut current_chinese = String::new();
-
-        for c in normalized.chars() {
-            if c.is_ascii_alphanumeric() {
-                // Flush Chinese if any
-                if !current_chinese.is_empty() {
-                    Self::add_chinese_tokens(&current_chinese, &mut tokens);
-                    current_chinese.clear();
-                }
-                current_english.push(c);
-            } else if Self::is_chinese_char(c) {
-                // Flush English if any
-                if !current_english.is_empty() {
-                    if current_english.len() >= 2 {
-                        tokens.push(current_english.clone());
-                    }
-                    current_english.clear();
-                }
-                current_chinese.push(c);
-            } else {
-                // Non-alphanumeric, non-Chinese - flush both
-                if !current_english.is_empty() {
-                    if current_english.len() >= 2 {
-                        tokens.push(current_english.clone());
-                    }
-                    current_english.clear();
-                }
-                if !current_chinese.is_empty() {
-                    Self::add_chinese_tokens(&current_chinese, &mut tokens);
-                    current_chinese.clear();
-                }
-            }
-        }
-
-        // Flush remaining
-        if !current_english.is_empty() && current_english.len() >= 2 {
-            tokens.push(current_english);
-        }
-        if !current_chinese.is_empty() {
-            Self::add_chinese_tokens(&current_chinese, &mut tokens);
-        }
-
-        tokens
-    }
-
-    /// Check if character is Chinese
-    fn is_chinese_char(c: char) -> bool {
-        // Common Chinese Unicode range
-        ('\u{4e00}'..='\u{9fff}').contains(&c)
-    }
-
-    /// Add Chinese tokens (character-level + 2-gram)
-    fn add_chinese_tokens(text: &str, tokens: &mut Vec<String>) {
-        let chars: Vec<char> = text.chars().collect();
-        for i in 0..chars.len() {
-            // Single character
-            tokens.push(chars[i].to_string());
-            // 2-gram
-            if i < chars.len() - 1 {
-                tokens.push(format!("{}{}", chars[i], chars[i + 1]));
-            }
-        }
-    }
-
-    /// Count token frequency
-    fn count_tokens(tokens: &[String]) -> HashMap<String, usize> {
-        let mut freq = HashMap::new();
-        for token in tokens {
-            *freq.entry(token.clone()).or_insert(0) += 1;
-        }
-        freq
+        self.bm25_store.search(query, limit).unwrap_or_default()
     }
 
     /// Perform hybrid search using RRF (Reciprocal Rank Fusion)
@@ -345,82 +180,88 @@ impl Searcher {
         Ok(fused)
     }
 
-    /// Reciprocal Rank Fusion (RRF) algorithm
-    /// RRF(d) = Σ weight / (k + rank(d))
+    /// Reciprocal Rank Fusion (RRF) — standard rank-based fusion (Cormack 2009).
+    /// Score = 1/(k+rank_vector) + 1/(k+rank_keyword).
+    /// Key = content hash so same chunk from both lists merges correctly.
     fn rrf_fusion(
         &self,
         vector_results: Vec<SearchHit>,
         keyword_results: Vec<SearchHit>,
         limit: usize,
     ) -> Vec<SearchHit> {
-        // Key: file_path:line_start (or file_path:0 if no line_start)
         struct FusedEntry {
             score: f32,
             hit: SearchHit,
-            sources: Vec<&'static str>,
+            has_vector: bool,
+            has_keyword: bool,
         }
+
+        // Key: file_path + content fingerprint (first 64 chars) for stable dedup
+        let chunk_key = |h: &SearchHit| {
+            let content_prefix: String = h.content.chars().take(64).collect();
+            format!("{}|{}", h.file_path, content_prefix)
+        };
 
         let mut scores: HashMap<String, FusedEntry> = HashMap::new();
 
-        // Process vector search results
-        for (index, hit) in vector_results.into_iter().enumerate() {
-            let key = format!("{}:{}", hit.file_path, hit.line_start.unwrap_or(0));
-            let rrf_score = VECTOR_WEIGHT / (RRF_K + index as f32 + 1.0);
-
-            if let Some(entry) = scores.get_mut(&key) {
-                entry.score += rrf_score;
-                entry.sources.push("vector");
-            } else {
-                scores.insert(
-                    key,
-                    FusedEntry {
-                        score: rrf_score,
-                        hit: SearchHit {
-                            matched_by: MatchType::Hybrid,
-                            ..hit
-                        },
-                        sources: vec!["vector"],
+        for (rank, hit) in vector_results.into_iter().enumerate() {
+            let key = chunk_key(&hit);
+            let rrf = 1.0 / (RRF_K + rank as f32 + 1.0);
+            scores
+                .entry(key)
+                .and_modify(|e| {
+                    e.score += rrf;
+                    e.has_vector = true;
+                })
+                .or_insert(FusedEntry {
+                    score: rrf,
+                    hit: SearchHit {
+                        matched_by: MatchType::Vector,
+                        ..hit
                     },
-                );
-            }
+                    has_vector: true,
+                    has_keyword: false,
+                });
         }
 
-        // Process keyword search results
-        for (index, hit) in keyword_results.into_iter().enumerate() {
-            let key = format!("{}:{}", hit.file_path, hit.line_start.unwrap_or(0));
-            let rrf_score = KEYWORD_WEIGHT / (RRF_K + index as f32 + 1.0);
-
-            if let Some(entry) = scores.get_mut(&key) {
-                entry.score += rrf_score;
-                entry.sources.push("keyword");
-            } else {
-                scores.insert(
-                    key,
-                    FusedEntry {
-                        score: rrf_score,
-                        hit: SearchHit {
-                            matched_by: MatchType::Hybrid,
-                            ..hit
-                        },
-                        sources: vec!["keyword"],
+        for (rank, hit) in keyword_results.into_iter().enumerate() {
+            let key = chunk_key(&hit);
+            let rrf = 1.0 / (RRF_K + rank as f32 + 1.0);
+            scores
+                .entry(key)
+                .and_modify(|e| {
+                    e.score += rrf;
+                    e.has_keyword = true;
+                })
+                .or_insert(FusedEntry {
+                    score: rrf,
+                    hit: SearchHit {
+                        matched_by: MatchType::Keyword,
+                        ..hit
                     },
-                );
-            }
+                    has_vector: false,
+                    has_keyword: true,
+                });
         }
 
-        // Convert to results and sort
+        // Normalize scores to [0,1] and set matched_by
+        let max_score = scores.values().map(|e| e.score).fold(0.0_f32, f32::max);
+
         let mut results: Vec<SearchHit> = scores
             .into_values()
             .map(|entry| {
-                let matched_by = if entry.sources.len() > 1 {
-                    MatchType::Hybrid // vector+keyword
-                } else if entry.sources.contains(&"vector") {
-                    MatchType::Vector
+                let matched_by = match (entry.has_vector, entry.has_keyword) {
+                    (true, true) => MatchType::Hybrid,
+                    (true, false) => MatchType::Vector,
+                    _ => MatchType::Keyword,
+                };
+                let norm_score = if max_score > 0.0 {
+                    entry.score / max_score
                 } else {
-                    MatchType::Keyword
+                    0.0
                 };
                 SearchHit {
-                    score: entry.score,
+                    score: norm_score,
                     matched_by,
                     ..entry.hit
                 }
@@ -613,6 +454,55 @@ impl Searcher {
         });
         results.truncate(limit);
         results
+    }
+
+    /// Expand top search hits by fetching neighboring chunks from the same file.
+    /// For each unique (file_path) in top hits, fetches `window` chunks before and after
+    /// the matched chunk and stitches them into the hit's content.
+    fn expand_with_neighbors(
+        &self,
+        hits: Vec<SearchHit>,
+        window: usize,
+        limit: usize,
+    ) -> Vec<SearchHit> {
+        // Cache of file chunks to avoid re-fetching same file
+        let mut file_cache: HashMap<String, Vec<SearchHit>> = HashMap::new();
+        let mut expanded = Vec::with_capacity(hits.len());
+
+        for hit in hits.into_iter().take(limit) {
+            let file_chunks = file_cache.entry(hit.file_path.clone()).or_insert_with(|| {
+                self.bm25_store
+                    .get_chunks_by_file(&hit.file_path)
+                    .unwrap_or_default()
+            });
+
+            if file_chunks.is_empty() {
+                expanded.push(hit);
+                continue;
+            }
+
+            // Find the matching chunk by content
+            let matched_idx = file_chunks
+                .iter()
+                .position(|c| c.content == hit.content)
+                .unwrap_or(0);
+
+            let start = matched_idx.saturating_sub(window);
+            let end = (matched_idx + window + 1).min(file_chunks.len());
+
+            let context: String = file_chunks[start..end]
+                .iter()
+                .map(|c| c.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+
+            expanded.push(SearchHit {
+                content: context,
+                ..hit
+            });
+        }
+
+        expanded
     }
 
     /// Check if index is built

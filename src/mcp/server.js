@@ -241,21 +241,53 @@ server.registerTool(
 server.registerTool(
   'oc_search',
   {
-    description: 'Search OpenContext documents by CONTENT (body text). Does NOT match folder names or file names — to browse a known project use oc_manifest({ folder_path: "project-name" }) instead. Returns matching content/docs/folders with file paths and stable_ids for citation.',
+    description: 'Search OpenContext documents by CONTENT using hybrid semantic + keyword search (BM25 + vector embeddings, RRF fusion). Understands natural language queries — not just exact keywords. Does NOT match folder names or file names — to browse a known project use oc_manifest({ folder_path: "project-name" }) instead. Returns matching content/docs/folders with file paths and stable_ids for citation. Default mode is "hybrid" (recommended); use "vector" for pure semantic similarity, "keyword" for exact BM25 only.',
     inputSchema: z.object({
       query: z.string().min(1).describe('Search query (keywords or natural language)'),
       limit: z.number().int().positive().optional().describe('Number of results (default 5)'),
       mode: z.enum(['hybrid', 'vector', 'keyword']).optional().describe('Search mode (default hybrid)'),
-      type: z.enum(['content', 'doc', 'folder']).optional().describe('Aggregation type (default content)')
+      type: z.enum(['content', 'doc', 'folder']).optional().describe('Aggregation type (default content)'),
+      folder_filter: z.string().optional().describe('Restrict search to this folder prefix, e.g. "Product/opencontext". Keeps results scoped to one project.'),
+      min_score: z.number().min(0).max(1).optional().describe('Minimum relevance score 0–1. Results below this are dropped. Recommended: 0.3–0.5 to cut noise.'),
+      date_from: z.string().optional().describe('Filter idea entries on or after this date (YYYY-MM-DD). Only affects idea/journal docs.'),
+      date_to: z.string().optional().describe('Filter idea entries on or before this date (YYYY-MM-DD). Only affects idea/journal docs.'),
+      include_neighbors: z.number().int().min(0).max(3).optional().describe('Include N neighboring chunks around each top match for richer context (0=disabled, 1=recommended). Stitches surrounding paragraphs into the result content.')
+    }),
+    outputSchema: z.object({
+      query: z.string(),
+      count: z.number(),
+      mode: z.string().optional(),
+      aggregate_by: z.string().optional(),
+      results: z.array(z.object({
+        file_path: z.string(),
+        display_name: z.string(),
+        content: z.string(),
+        score: z.number(),
+        matched_by: z.string(),
+        heading_path: z.string().optional(),
+        section_title: z.string().optional(),
+        doc_type: z.string().optional(),
+        entry_date: z.string().optional(),
+        entry_id: z.string().optional(),
+        hit_count: z.number().optional(),
+        folder_path: z.string().optional()
+      })),
+      index_missing: z.boolean().optional(),
+      error: z.string().optional()
     })
   },
-  async ({ query, limit, mode, type }) => {
+  async ({ query, limit, mode, type, folder_filter, min_score, date_from, date_to, include_neighbors }) => {
     try {
       const searcher = new Searcher();
       const results = await searcher.search(query, {
         limit: limit ?? 5,
         mode: mode ?? 'hybrid',
-        aggregateBy: type ?? 'content'
+        aggregateBy: type ?? 'content',
+        folderFilter: folder_filter,
+        minScore: min_score,
+        dateFrom: date_from,
+        dateTo: date_to,
+        includeNeighbors: include_neighbors,
       });
       const jsonOutput = searcher.formatResultsJson(query, results, {
         mode: mode ?? 'hybrid',
@@ -263,7 +295,6 @@ server.registerTool(
       });
       return toToolResponse(jsonOutput);
     } catch (err) {
-      // Return structured error so Agent can handle degradation
       if (err.message && (err.message.includes('index') || err.message.includes('Index'))) {
         return toToolResponse({
           error: 'INDEX_NOT_AVAILABLE',
@@ -348,7 +379,7 @@ server.registerTool(
 server.registerTool(
   'oc_index_status',
   {
-    description: 'Check search index status. Use this to determine if oc_search is available.',
+    description: 'Check search index status: availability, chunk counts, embedding model name and dimensions, last build time. Use before oc_search to confirm the index is ready.',
     inputSchema: z.object({})
   },
   async () => {
@@ -356,25 +387,87 @@ server.registerTool(
       const indexer = new Indexer();
       await indexer.initialize();
       const exists = await indexer.indexExists();
-      
+
       if (!exists) {
         return toToolResponse({
           available: false,
           message: 'Search index not found. Run `oc index build` to create it.'
         });
       }
-      
-      const stats = await indexer.getStats();
+
+      const info = await indexer.getIndexInfo();
       return toToolResponse({
-        available: true,
-        total_chunks: stats.totalChunks || 0,
-        last_updated: stats.lastUpdated || null
+        available: info.available ?? true,
+        vector_chunks: info.vector_chunks ?? 0,
+        bm25_docs: info.bm25_docs ?? 0,
+        total_docs: info.total_docs ?? 0,
+        embedding_model: info.embedding_model ?? 'unknown',
+        embedding_dimensions: info.embedding_dimensions ?? 0,
+        last_updated: info.last_updated ? new Date(info.last_updated).toISOString() : null
       });
     } catch (err) {
       return toToolResponse({
         available: false,
         message: `Index check failed: ${err.message}`
       });
+    }
+  }
+);
+
+// ===== P2: oc_get_context =====
+server.registerTool(
+  'oc_get_context',
+  {
+    description: 'Fetch full document content by stable_id or doc_path. Use this as the second step after oc_search: oc_search returns snippets, oc_get_context retrieves the full text of selected documents without token bloat from passing content through oc_search.',
+    inputSchema: z.object({
+      stable_id: z.string().uuid().optional().describe('Document stable_id (UUID) from oc_search result or oc://doc/<id> link'),
+      doc_path: z.string().optional().describe('Document path relative to contexts/, e.g. "Product/opencontext/guide"')
+    })
+  },
+  async ({ stable_id, doc_path }) => {
+    if (!stable_id && !doc_path) {
+      throw new Error('Provide either stable_id or doc_path');
+    }
+    let meta;
+    if (stable_id) {
+      meta = store.getDocByStableId(stable_id);
+    } else {
+      meta = store.getDocMeta({ docPath: doc_path });
+    }
+    const content = store.getDocContent(meta.abs_path);
+    return toToolResponse({
+      stable_id: meta.stable_id,
+      rel_path: meta.rel_path,
+      abs_path: meta.abs_path,
+      description: meta.description || '',
+      updated_at: meta.updated_at,
+      content
+    });
+  }
+);
+
+// ===== P2: oc_index_flush =====
+server.registerTool(
+  'oc_index_flush',
+  {
+    description: 'Flush any pending index updates immediately, without waiting for the next 5-minute batch cycle. Use after saving multiple documents when you need oc_search to reflect recent changes right away. No-op if the index sync service is not running.',
+    inputSchema: z.object({})
+  },
+  async () => {
+    try {
+      const native = require('../core/native');
+      if (!native.isAvailable()) {
+        return toToolResponse({ flushed: false, message: 'Native bindings not available.' });
+      }
+      const flushed = native.get().flushIndexSync();
+      return toToolResponse({
+        flushed,
+        message: flushed
+          ? 'Flush signal sent — pending updates will be processed immediately.'
+          : 'Index sync service is not running; nothing to flush.'
+      });
+    } catch (err) {
+      return toToolResponse({ flushed: false, message: `Flush failed: ${err.message}` });
     }
   }
 );

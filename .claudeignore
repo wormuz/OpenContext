@@ -1,0 +1,10 @@
+node_modules/
+dist/
+src-tauri/target/
+crates/opencontext-node/target/
+crates/opencontext-node/npm/
+contexts/
+*.db
+*.node
+*.img
+*.elf

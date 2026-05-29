@@ -56,6 +56,11 @@ class NativeSearcher {
       mode,
       aggregateBy,
       docType: options.docType,
+      folderFilter: options.folderFilter,
+      minScore: options.minScore,
+      dateFrom: options.dateFrom,
+      dateTo: options.dateTo,
+      includeNeighbors: options.includeNeighbors,
     });
 
     // Native returns { results: [...], count: N, ... }
@@ -172,6 +177,11 @@ class NativeIndexer {
   async getStats() {
     await this.initialize();
     return await this._indexer.getStats();
+  }
+
+  async getIndexInfo() {
+    await this.initialize();
+    return await this._indexer.getIndexInfo();
   }
 
   /**

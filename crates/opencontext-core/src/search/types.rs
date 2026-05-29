@@ -101,6 +101,16 @@ pub struct SearchOptions {
     pub aggregate_by: Option<AggregateBy>,
     /// Filter by document type: "doc" | "idea"
     pub doc_type: Option<String>,
+    /// Filter by folder path prefix (e.g. "Product/opencontext")
+    pub folder_filter: Option<String>,
+    /// Minimum relevance score 0–1 (results below this are dropped)
+    pub min_score: Option<f32>,
+    /// Filter by entry date >= this date (ISO date, ideas only, e.g. "2024-01-01")
+    pub date_from: Option<String>,
+    /// Filter by entry date <= this date (ISO date, ideas only)
+    pub date_to: Option<String>,
+    /// Number of neighboring chunks to include around each top result (0 = disabled)
+    pub include_neighbors: Option<usize>,
 }
 
 impl SearchOptions {

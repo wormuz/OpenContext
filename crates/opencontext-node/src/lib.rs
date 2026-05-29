@@ -17,13 +17,16 @@ use opencontext_core::search::{
 };
 use opencontext_core::{CoreError, EnvOverrides, OpenContext};
 use serde::Serialize;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 // Global event bus for document/folder events
 static EVENT_BUS: Lazy<SharedEventBus> = Lazy::new(create_event_bus);
 
 // Flag to track if IndexSyncService is running
 static INDEX_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
+
+// Flush signal — notified to wake up the interval loop immediately
+static FLUSH_NOTIFY: Lazy<Arc<Notify>> = Lazy::new(|| Arc::new(Notify::new()));
 
 static CONTEXT: OnceCell<OpenContext> = OnceCell::new();
 
@@ -304,6 +307,11 @@ pub struct SearchOptions {
     pub mode: Option<String>,
     pub aggregate_by: Option<String>,
     pub doc_type: Option<String>,
+    pub folder_filter: Option<String>,
+    pub min_score: Option<f64>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    pub include_neighbors: Option<u32>,
 }
 
 impl From<SearchOptions> for RustSearchOptions {
@@ -328,6 +336,11 @@ impl From<SearchOptions> for RustSearchOptions {
             mode,
             aggregate_by,
             doc_type: opts.doc_type,
+            folder_filter: opts.folder_filter,
+            min_score: opts.min_score.map(|v| v as f32),
+            date_from: opts.date_from,
+            date_to: opts.date_to,
+            include_neighbors: opts.include_neighbors.map(|v| v as usize),
         }
     }
 }
@@ -523,6 +536,13 @@ impl Indexer {
         serde_json::to_value(&stats).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
+    /// Get extended index info (model, bm25 count, dimensions, etc.)
+    #[napi]
+    pub async fn get_index_info(&self) -> Result<serde_json::Value> {
+        let indexer = self.inner.lock().await;
+        indexer.get_index_info().await.map_err(search_error_to_napi)
+    }
+
     /// Clean/reset the index
     #[napi]
     pub async fn clean(&self) -> Result<()> {
@@ -557,12 +577,18 @@ pub async fn start_index_sync(interval_secs: Option<u32>) -> Result<bool> {
     }
 
     let oc_ctx = ctx()?;
-    let contexts_root = PathBuf::from(&oc_ctx.env_info().contexts_root);
+    let env = oc_ctx.env_info();
+    let contexts_root = PathBuf::from(&env.contexts_root);
+    let db_path = PathBuf::from(&env.db_path);
 
     let config = SearchConfig::load().map_err(search_error_to_napi)?;
 
     let interval = interval_secs.unwrap_or(300) as u64;
-    let sync_service = IndexSyncService::new(config, contexts_root).with_interval(interval);
+    let flush_notify = FLUSH_NOTIFY.clone();
+    let sync_service = IndexSyncService::new(config, contexts_root)
+        .with_interval(interval)
+        .with_db_path(db_path)
+        .with_flush_notify(flush_notify);
 
     let event_bus = EVENT_BUS.clone();
 
@@ -581,6 +607,16 @@ pub async fn start_index_sync(interval_secs: Option<u32>) -> Result<bool> {
 #[napi]
 pub fn is_index_sync_running() -> bool {
     INDEX_SYNC_RUNNING.load(Ordering::SeqCst)
+}
+
+/// Flush pending index updates immediately (wake up interval loop)
+#[napi]
+pub fn flush_index_sync() -> bool {
+    if !INDEX_SYNC_RUNNING.load(Ordering::SeqCst) {
+        return false;
+    }
+    FLUSH_NOTIFY.notify_one();
+    true
 }
 
 /// Get pending updates count from index sync service

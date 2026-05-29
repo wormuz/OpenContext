@@ -23,6 +23,7 @@
 //! }).await?;
 //! ```
 
+mod bm25_store;
 mod chunker;
 mod config;
 mod embedding;
@@ -36,6 +37,7 @@ mod vector_store;
 #[cfg(test)]
 mod tests;
 
+pub use bm25_store::Bm25Store;
 pub use chunker::Chunker;
 pub use config::{EmbeddingConfig, SearchConfig};
 pub use embedding::EmbeddingClient;

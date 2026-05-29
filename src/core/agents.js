@@ -207,24 +207,24 @@ function projectAgentsTemplate() {
 }
 const COMMAND_DEFS = [
   {
-    name: 'opencontext-help',
-    title: '/opencontext-help',
+    name: 'oc-help',
+    title: '/oc-help',
     description: 'Start here — choose the right OpenContext command (beginner-friendly)',
     body: [
       'You are assisting a user who may be new to OpenContext. Your goal is to route them to the right workflow and execute it.',
       '',
       '1. Ask the user which of these they want (pick one):',
-      '   - A) "I want to find what I\'ve written before" → use **/opencontext-search**',
-      '   - B) "I want to load background/context for the current task" → use **/opencontext-context**',
-      '   - C) "I want to create a new doc/idea" → use **/opencontext-create**',
-      '   - D) "I want to save/update a doc with what we just learned" → use **/opencontext-iterate**',
-      '2. If they are unsure, default to **/opencontext-context**.',
+      '   - A) "I want to find what I\'ve written before" → use **/oc-search**',
+      '   - B) "I want to load background/context for the current task" → use **/oc-context**',
+      '   - C) "I want to create a new doc/idea" → use **/oc-create**',
+      '   - D) "I want to save/update a doc with what we just learned" → use **/oc-iterate**',
+      '2. If they are unsure, default to **/oc-context**.',
       '3. Then run the chosen command and continue the task.'
     ].join('\n')
   },
   {
-    name: 'opencontext-context',
-    title: '/opencontext-context',
+    name: 'oc-context',
+    title: '/oc-context',
     description: 'Load relevant OpenContext docs for the current task (safe, no index build)',
     body: [
       'Goal: Load enough context from OpenContext so you can proceed confidently.',
@@ -243,8 +243,8 @@ const COMMAND_DEFS = [
     ].join('\n')
   },
   {
-    name: 'opencontext-search',
-    title: '/opencontext-search',
+    name: 'oc-search',
+    title: '/oc-search',
     description: 'Search OpenContext to find the right docs (safe, no index build by default)',
     body: [
       'Goal: Help the user find relevant existing docs quickly.',
@@ -253,7 +253,7 @@ const COMMAND_DEFS = [
       '1. Ask the user for a short query (or infer one from the conversation).',
       '2. Try search in read-only mode:',
       '   - Run: `oc search "<query>" --format json --limit 10`',
-      '   - If it succeeds, use results to pick candidate docs and then use **/opencontext-context** (manifest + reads) to load and cite them.',
+      '   - If it succeeds, use results to pick candidate docs and then use **/oc-context** (manifest + reads) to load and cite them.',
       '3. If search fails due to missing index:',
       '   - Fall back to `oc context manifest <folder> --limit 20` and use doc `description` + filename triage.',
       '   - Optionally suggest a controlled index build, but do NOT run it unless the user explicitly approves.',
@@ -261,8 +261,8 @@ const COMMAND_DEFS = [
     ].join('\n')
   },
   {
-    name: 'opencontext-create',
-    title: '/opencontext-create',
+    name: 'oc-create',
+    title: '/oc-create',
     description: 'Create a new idea or problem statement inside OpenContext',
     body: [
       '0. **Blocking requirement**: Do NOT answer the user\'s broader question until the document has been created and minimally populated.',
@@ -286,8 +286,8 @@ const COMMAND_DEFS = [
     ].join('\n')
   },
   {
-    name: 'opencontext-iterate',
-    title: '/opencontext-iterate',
+    name: 'oc-iterate',
+    title: '/oc-iterate',
     description: 'Enrich an existing idea with additional context from OpenContext',
     body: [
       '1. Identify the target idea document from the current discussion (ask only if ambiguous). Set `CONTEXTS_ROOT=${OPENCONTEXT_CONTEXTS_ROOT:-$HOME/.opencontext/contexts}` and load `${CONTEXTS_ROOT}/<target_doc>` to understand existing sections (never duplicate it under the project repo).',
@@ -339,6 +339,18 @@ function formatSkill(def) {
     '---',
     '',
     `# ${def.title}`,
+    '',
+    body,
+    ''
+  ].join('\n');
+}
+
+function formatCodexPrompt(def) {
+  const body = `${COMMAND_GUARDRAILS}\n\n${def.body.trim()}`;
+  return [
+    '---',
+    `description: ${def.description}`,
+    '---',
     '',
     body,
     ''
@@ -400,6 +412,7 @@ function ensureUserCommands(toolsSelection) {
   const tools = normalizeToolSelection(toolsSelection);
   const cursorCommandsDir = tools.cursor ? path.join(getCursorConfigDir(), 'commands') : null;
   const claudeCommandsDir = tools.claude ? path.join(getClaudeConfigDir(), 'commands') : null;
+  const codexPromptsDir = tools.codex ? path.join(getCodexConfigDir(), 'prompts') : null;
 
   COMMAND_DEFS.forEach((def) => {
     if (cursorCommandsDir) {
@@ -412,6 +425,12 @@ function ensureUserCommands(toolsSelection) {
       const claudePath = path.join(claudeCommandsDir, `${def.name}.md`);
       if (writeFileIfChanged(claudePath, formatClaudeCommand(def))) {
         outputs.push(claudePath);
+      }
+    }
+    if (codexPromptsDir) {
+      const codexPath = path.join(codexPromptsDir, `${def.name}.md`);
+      if (writeFileIfChanged(codexPath, formatCodexPrompt(def))) {
+        outputs.push(codexPath);
       }
     }
   });
@@ -440,7 +459,7 @@ function ensureUserSkills(toolsSelection) {
     outputs.push(...ensureSkillsAtPath(path.join(getClaudeConfigDir(), 'skills')));
   }
   if (tools.codex) {
-    outputs.push(...ensureSkillsAtPath(path.join(getCodexConfigDir(), 'skills')));
+    outputs.push(...ensureSkillsAtPath(path.join(os.homedir(), '.agents', 'skills')));
   }
   return outputs;
 }

@@ -11,7 +11,6 @@ graph TB
         CLI["CLI (bin/oc.js)"]
         WEB["Web UI (src/ui/)"]
         TAURI["Desktop App (src-tauri/)"]
-        IOS["iOS App (src-ios/)"]
     end
 
     subgraph "Node.js Core"
@@ -44,7 +43,6 @@ graph TB
     LANCE --> EMBED
     TAURI --> RUST_CORE
     TAURI --> AI
-    IOS --> AI
 ```
 
 ## Directory Structure
@@ -90,7 +88,6 @@ OpenContext/
 │   └── server.js                # Express API server
 ├── src-tauri/                   # Tauri desktop app
 │   └── src/main.rs              # 25 Tauri commands
-├── src-ios/                     # iOS app (React Native)
 │   ├── screens/                 # IdeasScreen, SettingsScreen
 │   ├── services/                # ideas.js, ai.js
 │   └── db/                      # SQLite schema
@@ -178,23 +175,6 @@ SearchOptions { query, limit, mode, aggregateBy }
 **Special Features**:
 - `IndexSyncService`: Background index updates via event bus
 - macOS Edit menu for WebView clipboard support
-
-### iOS App (`src-ios/`)
-
-**Purpose**: Mobile journaling app (separate from main system).
-
-**Architecture**: React Native + Expo + SQLite
-
-| Screen | Purpose |
-|--------|---------|
-| `IdeasScreen` | Timeline thread view with composer |
-| `SettingsScreen` | AI config, language settings |
-| `DocsScreen` | Placeholder (coming soon) |
-
-**Key Differences from Web**:
-- File-based thread storage (not SQLite)
-- Local-only (no MCP/sync)
-- AI reflection per thread
 
 ## Data Flow
 
@@ -298,13 +278,7 @@ Environment vars > config.json > defaults
 
 ### Tauri
 1. **API key masking**: Shows first 3 + last 4 chars only
-2. **Max tokens hardcoded**: OpenAI requests limited to 500 tokens
-3. **Ollama URL detection**: Auto-detects local Ollama from port 11434
-
-### iOS
-1. **No cloud sync**: Everything local only
-2. **Thread ID format**: Prefixed with `.ideas/` path
-3. **Image paths**: Stored as absolute paths (not portable)
+2. **Ollama URL detection**: Auto-detects local Ollama from port 11434
 
 ## Navigation Guide
 
@@ -319,7 +293,6 @@ Environment vars > config.json > defaults
 | NAPI bindings | `crates/opencontext-node/src/lib.rs` |
 | Web UI routing | `src/ui/src/App.jsx` |
 | Tauri commands | `src-tauri/src/main.rs` |
-| iOS ideas | `src-ios/services/ideas.js` |
 | CI pipelines | `.github/workflows/` |
 | Cursor commands | `.cursor/commands/` |
 
@@ -359,7 +332,6 @@ npm run tauri:build   # Build desktop app
 3. **Event-driven index sync**: Decoupled, batched updates prevent API rate limits
 4. **Dual backend (Tauri/HTTP)**: Same React app works in desktop and browser
 5. **Stable IDs for docs**: References survive renames/moves
-6. **Separate iOS app**: Mobile-first UX differs significantly from desktop
 
 ---
 

@@ -3,6 +3,9 @@
 #[cfg(test)]
 mod tests;
 
+pub mod migrations;
+pub mod wal;
+
 use chrono::{SecondsFormat, Utc};
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -126,34 +129,7 @@ impl OpenContext {
 
         let conn = Connection::open(&db_path)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS folders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                parent_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
-                rel_path TEXT NOT NULL UNIQUE,
-                abs_path TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS docs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
-                rel_path TEXT NOT NULL UNIQUE,
-                abs_path TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                stable_id TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-        ",
-        )?;
-
-        ensure_schema_migrations(&conn)?;
+        migrations::run(&conn)?;
 
         Ok(Self {
             contexts_root,
@@ -726,6 +702,7 @@ impl OpenContext {
                     ts
                 ],
             )?;
+            wal::append(conn, &wal::WalOp::Update { rel_path: rel_path.clone() }, &ts)?;
             Ok(sid)
         })?;
 
@@ -779,6 +756,10 @@ impl OpenContext {
                     doc.id
                 ],
             )?;
+            wal::append(conn, &wal::WalOp::Rename {
+                old_path: rel_doc_path.clone(),
+                new_path: new_rel_path.clone(),
+            }, &ts)?;
             Ok(())
         })?;
 
@@ -826,6 +807,10 @@ impl OpenContext {
                 "UPDATE docs SET name = ?1, rel_path = ?2, abs_path = ?3, updated_at = ?4 WHERE id = ?5",
                 params![new_name, new_rel_path, new_abs_path.to_string_lossy(), ts, doc.id],
             )?;
+            wal::append(conn, &wal::WalOp::Rename {
+                old_path: rel_doc_path.clone(),
+                new_path: new_rel_path.clone(),
+            }, &ts)?;
             Ok(())
         })?;
 
@@ -852,6 +837,13 @@ impl OpenContext {
         }
         self.with_conn(|conn| {
             conn.execute("DELETE FROM docs WHERE id = ?1", params![doc.id])?;
+            wal::append(
+                conn,
+                &wal::WalOp::Remove {
+                    rel_path: rel_doc_path.clone(),
+                },
+                &now_iso(),
+            )?;
             Ok(())
         })?;
 
@@ -930,6 +922,13 @@ impl OpenContext {
                     params![ts, doc.id],
                 )?;
             }
+            wal::append(
+                conn,
+                &wal::WalOp::Update {
+                    rel_path: rel_doc_path.clone(),
+                },
+                &ts,
+            )?;
             Ok(())
         })?;
 

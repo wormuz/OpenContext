@@ -78,10 +78,22 @@ src-tauri/              # Tauri desktop app (uses opencontext-core)
 3. **MCP tools**: `oc_manifest`, `oc_search`, `oc_list_docs`, etc. exposed for AI assistants
 4. **UI**: React app talks to Express API in `src/ui/server.js` or Tauri commands
 
+## CI
+
+Three checks run on push:
+- **Lint** — `cargo fmt --check` on `crates/opencontext-core`. Fails in 23s if Rust not formatted.
+- **Test JS** — `npm run test:all` (~5m)
+- **Test Rust** — `cargo test` in crates (~9m)
+
+Before every commit touching Rust (mandatory, in order):
+1. `~/.cargo/bin/cargo clippy --manifest-path crates/opencontext-core/Cargo.toml` — must be zero errors
+2. `~/.cargo/bin/cargo fmt --manifest-path crates/opencontext-core/Cargo.toml`
+The pre-commit hook skips `cargo fmt` when `cargo` is not in `$PATH` (hook uses bare `cargo`, not full path). CI runs clippy with `-D warnings` — any warning = build failure.
+
 ## Code Conventions
 
 - 2-space indentation for JS/JSON
-- `cargo fmt` for Rust (enforced by pre-commit hook)
+- `cargo fmt` for Rust (run manually — pre-commit hook unreliable, skips when cargo not in PATH)
 - React components: PascalCase (e.g., `SearchModal.jsx`)
 - Tests: `*.test.js` or `*.test.cjs`, use Node's built-in `node --test`
 - Commit messages: Conventional Commits (`feat:`, `fix:`, `chore:`)

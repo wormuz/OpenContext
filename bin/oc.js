@@ -650,7 +650,16 @@ indexCmd
       const stats = await indexer.buildIndex({
         folder: options.folder,
         force: options.force,
-        onProgress: (progress) => {
+        onProgress: (() => {
+          let embStart = 0;
+          let lastEta = '?';
+          let spinner = 0;
+          const SPIN = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+          const bar = (cur, tot, width = 20) => {
+            const filled = Math.round((cur / tot) * width);
+            return '█'.repeat(filled) + '░'.repeat(width - filled);
+          };
+          return (progress) => {
           if (progress.phase === 'start') {
             const msg = progress.message || (options.force ? 'Full rebuild' : 'Incremental update');
             console.log(`🔄 ${msg}...`);
@@ -659,11 +668,23 @@ indexCmd
           } else if (progress.phase === 'detect') {
             console.log(`🔍 ${progress.message || ''}`);
           } else if (progress.phase === 'chunk') {
-            console.log(`✂️  ${progress.message || ''}`);
+            const s = SPIN[spinner++ % SPIN.length];
+            process.stdout.write(`\r${s} Chunking...   `);
+            if (!progress.current || progress.current === progress.total) {
+              process.stdout.write('\r✂️  Chunking done        \n');
+            }
           } else if (progress.phase === 'embedding') {
-            console.log(`🧠 ${progress.message || `Generating embeddings batch ${progress.current}/${progress.total}`}`);
-          } else if (progress.phase === 'embedding_progress') {
-            process.stdout.write(`\r   Processing batch ${progress.current}/${progress.total}...`);
+            const cur = progress.current, tot = progress.total;
+            if (cur === 1) embStart = Date.now();
+            const pct = Math.round((cur / tot) * 100);
+            const elapsed = (Date.now() - embStart) / 1000;
+            const rate = cur > 1 ? ((cur - 1) / elapsed).toFixed(1) : null;
+            const eta = cur > 1 ? Math.round((elapsed / (cur - 1)) * (tot - cur)) : null;
+            lastEta = eta !== null ? `${eta}s` : '?';
+            const rateStr = rate ? ` ${rate}/s` : '';
+            const s = SPIN[spinner++ % SPIN.length];
+            process.stdout.write(`\r🧠 ${s} [${bar(cur, tot)}] ${cur}/${tot} (${pct}%)${rateStr} ETA ${lastEta}   `);
+            if (cur === tot) process.stdout.write('\r🧠 ✓ Embeddings done                                          \n');
           } else if (progress.phase === 'done') {
             if (progress.noChanges) {
               console.log('✅ No changes, index is up to date!');
@@ -671,9 +692,10 @@ indexCmd
               console.log('✅ Index build complete!');
             }
           }
-        }
+        };
+        })()
       });
-      
+
       const modeLabel = stats.mode === 'full' ? 'Full' : 'Incremental';
       console.log(`\n📊 ${modeLabel} stats: ${stats.fileCount} files, ${stats.chunkCount} chunks`);
       if (stats.mode === 'incremental') {
@@ -697,12 +719,15 @@ indexCmd
         return;
       }
       
-      const stats = await indexer.getStats();
+      const info = await indexer.getIndexInfo();
       console.log(`✅ Search index ready`);
-      console.log(`📊 Indexed chunks: ${stats.totalChunks || 0}`);
-      if (stats.lastUpdated) {
-        const date = new Date(stats.lastUpdated);
-        console.log(`🕐 Last updated: ${date.toLocaleString()}`);
+      console.log(`📊 Vector chunks:   ${info.vector_chunks ?? 0}`);
+      console.log(`📝 BM25 docs:       ${info.bm25_docs ?? 0}`);
+      console.log(`📁 Total docs:      ${info.total_docs ?? 0}`);
+      console.log(`🧠 Embedding model: ${info.embedding_model ?? 'unknown'} (${info.embedding_dimensions ?? 0}d)`);
+      if (info.last_updated) {
+        const date = new Date(info.last_updated);
+        console.log(`🕐 Last updated:    ${date.toLocaleString()}`);
       }
     })
   );
@@ -764,6 +789,26 @@ indexCmd
       
       console.log('✅ Search index cleaned successfully.');
       console.log('   Run "oc index build" to rebuild the index.');
+    })
+  );
+
+indexCmd
+  .command('flush')
+  .description('Flush pending index updates immediately (without waiting for the next 5-minute cycle). Only works while the background sync service is running (e.g. inside the MCP server process).')
+  .action(
+    handle(() => {
+      const native = require('../src/core/native');
+      if (!native.isAvailable()) {
+        console.log('❌ Native bindings not available.');
+        return;
+      }
+      const flushed = native.get().flushIndexSync();
+      if (flushed) {
+        console.log('✅ Flush signal sent — pending updates will be processed immediately.');
+      } else {
+        console.log('ℹ️  Index sync service is not running in this process.');
+        console.log('   Use `oc index build` to rebuild the full index.');
+      }
     })
   );
 

@@ -66,3 +66,4 @@ coverage/
 
 # Local config (use mcp.example.json as template)
 mcp.json
+CLAUDE.md
