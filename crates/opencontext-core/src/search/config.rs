@@ -199,6 +199,8 @@ struct NodeJsConfig {
     embedding_model: Option<String>,
     #[serde(rename = "EMBEDDING_BATCH_SIZE")]
     embedding_batch_size: Option<usize>,
+    #[serde(rename = "EMBEDDING_DIMENSIONS")]
+    embedding_dimensions: Option<usize>,
 
     // Legacy naming (backward compatibility)
     #[serde(rename = "OPENAI_API_KEY")]
@@ -252,6 +254,11 @@ impl SearchConfig {
                     if let Some(batch_size) = node_config.embedding_batch_size {
                         if batch_size > 0 {
                             config.embedding.batch_size = batch_size;
+                        }
+                    }
+                    if let Some(dims) = node_config.embedding_dimensions {
+                        if dims > 0 {
+                            config.embedding.dimensions = dims;
                         }
                     }
                 }

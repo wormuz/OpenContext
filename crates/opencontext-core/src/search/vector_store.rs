@@ -76,15 +76,15 @@ impl VectorStore {
                     if let Some(dim) = existing_dim {
                         if dim != self.dimensions {
                             log::warn!(
-                                "[VectorStore] Dimension mismatch: index has {}d vectors but config expects {}d. \
-                                Run `oc index build` to rebuild with the new model.",
+                                "[VectorStore] Config dimensions {}d differ from index {}d — using index dimensions. \
+                                Run `oc index build` to rebuild if you changed the embedding model.",
+                                self.dimensions,
                                 dim,
-                                self.dimensions
                             );
-                            // Don't set self.table — treat as empty so rebuild works
-                        } else {
-                            self.table = Some(table);
+                            // Accept the table and use its actual dimensions
+                            self.dimensions = dim;
                         }
+                        self.table = Some(table);
                     } else {
                         self.table = Some(table);
                     }
@@ -452,6 +452,11 @@ impl VectorStore {
         }
 
         Ok(())
+    }
+
+    /// Get actual embedding dimensions (from opened table, reflects real index dims)
+    pub fn dimensions(&self) -> usize {
+        self.dimensions
     }
 
     /// Get total chunk count

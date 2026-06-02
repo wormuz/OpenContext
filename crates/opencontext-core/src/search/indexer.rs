@@ -922,7 +922,24 @@ impl Indexer {
             .get("embeddingModel")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
-        let embedding_dim = self.config.embedding.dimensions;
+        // Use actual dimensions from the opened table, not config default.
+        // If metadata has embeddingDimensions (written after a build), prefer that for consistency.
+        let embedding_dim = metadata
+            .get("embeddingDimensions")
+            .and_then(|v| v.as_u64())
+            .map(|d| d as usize)
+            .unwrap_or_else(|| self.vector_store.dimensions());
+
+        // Fallback: count checksums keys as doc count (written by Node.js indexer)
+        let total_docs = if total_docs > 0 {
+            total_docs
+        } else {
+            metadata
+                .get("checksums")
+                .and_then(|v| v.as_object())
+                .map(|m| m.len() as u64)
+                .unwrap_or(0)
+        };
 
         Ok(serde_json::json!({
             "available": vector_count > 0,
@@ -962,6 +979,7 @@ impl Indexer {
 
         metadata["lastUpdated"] = serde_json::json!(now);
         metadata["embeddingModel"] = serde_json::json!(&self.config.embedding.model);
+        metadata["embeddingDimensions"] = serde_json::json!(self.vector_store.dimensions());
         if let Ok(count) = self.vector_store.count().await {
             metadata["totalDocs"] = serde_json::json!(count);
         }
