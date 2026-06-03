@@ -744,13 +744,23 @@ indexCmd
 
       let total = 0;
       for (const f of folders) {
-        const added = store.reconcileFolder({ folderPath: f });
-        if (added.length === 0) {
+        const result = store.reconcileFolder({ folderPath: f });
+        const added = result.added ?? result ?? [];
+        const removed = result.removed ?? [];
+        if (added.length === 0 && removed.length === 0) {
           console.log(`✅ ${f}: nothing to reconcile`);
         } else {
-          console.log(`📥 ${f}: registered ${added.length} file(s)`);
-          for (const rel of added) {
-            console.log(`   + ${rel}`);
+          if (added.length > 0) {
+            console.log(`📥 ${f}: registered ${added.length} file(s)`);
+            for (const rel of added) {
+              console.log(`   + ${rel}`);
+            }
+          }
+          if (removed.length > 0) {
+            console.log(`🗑️  ${f}: removed ${removed.length} stale entry(ies)`);
+            for (const rel of removed) {
+              console.log(`   - ${rel}`);
+            }
           }
         }
         total += added.length;
