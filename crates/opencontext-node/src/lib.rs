@@ -571,7 +571,7 @@ pub fn load_search_config() -> Result<serde_json::Value> {
 /// @returns true if started, false if already running
 #[napi]
 pub async fn start_index_sync(interval_secs: Option<u32>) -> Result<bool> {
-    // Check if already running
+    // Check if already running in this process
     if INDEX_SYNC_RUNNING.swap(true, Ordering::SeqCst) {
         return Ok(false); // Already running
     }
@@ -580,6 +580,33 @@ pub async fn start_index_sync(interval_secs: Option<u32>) -> Result<bool> {
     let env = oc_ctx.env_info();
     let contexts_root = PathBuf::from(&env.contexts_root);
     let db_path = PathBuf::from(&env.db_path);
+
+    // Cross-process lock: only one oc mcp process may run IndexSync at a time.
+    // We use a PID lockfile so stale locks from crashed processes are detected.
+    let lock_path = PathBuf::from(&env.db_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("/tmp"))
+        .join("index-sync.lock");
+
+    let my_pid = std::process::id();
+    if lock_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&lock_path) {
+            if let Ok(pid) = content.trim().parse::<u32>() {
+                // Check if the process owning the lock is still alive
+                let proc_path = PathBuf::from(format!("/proc/{}", pid));
+                if proc_path.exists() && pid != my_pid {
+                    log::info!(
+                        "[IndexSync] Another process ({}) holds the lock, skipping",
+                        pid
+                    );
+                    INDEX_SYNC_RUNNING.store(false, Ordering::SeqCst);
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    // Write our PID to the lockfile
+    let _ = std::fs::write(&lock_path, my_pid.to_string());
 
     let config = SearchConfig::load().map_err(search_error_to_napi)?;
 
@@ -598,6 +625,7 @@ pub async fn start_index_sync(interval_secs: Option<u32>) -> Result<bool> {
             log::error!("[IndexSync] Service error: {}", e);
         }
         INDEX_SYNC_RUNNING.store(false, Ordering::SeqCst);
+        let _ = std::fs::remove_file(&lock_path);
     });
 
     Ok(true)
